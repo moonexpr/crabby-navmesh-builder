@@ -1,0 +1,30 @@
+[package]
+name = "crabby-navmesh-builder"
+version = "1.0.0"
+edition = "2024"
+rust-version = "1.88"
+description = "Crabby Navmesh Builder: a multi-threaded Source engine navigation mesh (.nav) generator for compiled maps (.bsp)"
+license = "MIT"
+repository = "https://github.com/moonexpr/crabby-navmesh-builder"
+readme = "README.md"
+keywords = ["source-engine", "navmesh", "bsp", "tf2", "gamedev"]
+categories = ["command-line-utilities", "game-development"]
+
+[dependencies]
+anyhow = "1.0.104"
+clap = { version = "4.6.7", features = ["derive"] }
+glam = { version = "0.34.1", features = ["serde"] }
+lzma-rs = "0.3.0"
+rayon = "1.12.0"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+thiserror = "2.0.21"
+toon-format = { version = "0.7.0", default-features = false }
+
+[dev-dependencies]
+tempfile = "3.27.0"
+toon-format = { version = "0.7.0", default-features = false }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

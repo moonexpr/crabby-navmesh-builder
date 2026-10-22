@@ -1,0 +1,133 @@
+mod support;
+
+use std::path::{Path, PathBuf};
+use std::process::{Command, Output};
+
+use crabby_navmesh_builder::geom::Vec3;
+use serde_json::Value;
+
+use support::bsp_writer::{BspWriter, CONTENTS_SOLID};
+
+/// A walled 512-unit room with one spawn point.
+fn room_bsp(dir: &Path) -> PathBuf {
+    let mut map = BspWriter::new();
+    map.box_brush(0, Vec3::new(0.0, 0.0, -16.0), Vec3::new(512.0, 512.0, 0.0), CONTENTS_SOLID);
+    map.entity(&[("classname", "info_player_teamspawn"), ("origin", "256 256 8")]);
+    let path = dir.join("room.bsp");
+    std::fs::write(&path, map.build(20)).expect("fixture written");
+    path
+}
+
+fn run(binary: &str, args: &[&str]) -> Output {
+    Command::new(binary).args(args).output().expect("binary runs")
+}
+
+fn toon(output: &Output) -> Value {
+    let text = String::from_utf8(output.stdout.clone()).expect("utf-8");
+    toon_format::decode_default(&text).unwrap_or_else(|e| panic!("stdout is TOON ({e}):\n{text}"))
+}
+
+fn json(output: &Output) -> Value {
+    serde_json::from_slice(&output.stdout).expect("stdout is JSON")
+}
+
+const NAVGEN: &str = env!("CARGO_BIN_EXE_navgen");
+const NAVINFO: &str = env!("CARGO_BIN_EXE_navinfo");
+
+#[test]
+fn navgen_writes_the_nav_and_reports_in_toon() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let bsp = room_bsp(dir.path());
+    let output = run(NAVGEN, &[bsp.to_str().expect("utf-8 path")]);
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    let report = toon(&output);
+    assert_eq!(report["status"], "ok");
+    assert_eq!(report["nav"]["areas"], 1);
+    assert_eq!(report["seeds"]["spawn_points"], 1);
+    let nav = dir.path().join("room.nav");
+    assert_eq!(report["nav"]["path"], nav.to_str().expect("utf-8 path"));
+    assert!(nav.exists());
+}
+
+#[test]
+fn navgen_reports_in_json_when_asked() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let bsp = room_bsp(dir.path());
+    let out = dir.path().join("custom.nav");
+    let output = run(NAVGEN, &[bsp.to_str().expect("utf-8"), "-o", out.to_str().expect("utf-8"), "--json"]);
+    assert!(output.status.success());
+    let report = json(&output);
+    assert_eq!(report["status"], "ok");
+    assert_eq!(report["mesh"]["areas"], 1);
+    assert!(out.exists());
+}
+
+#[test]
+fn navgen_reports_bad_input_with_exit_code_2() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let junk = dir.path().join("junk.bsp");
+    std::fs::write(&junk, b"definitely not a map").expect("written");
+    let output = run(NAVGEN, &[junk.to_str().expect("utf-8")]);
+    assert_eq!(output.status.code(), Some(2));
+    let report = toon(&output);
+    assert_eq!(report["status"], "error");
+    assert_eq!(report["kind"], "input");
+}
+
+#[test]
+fn navgen_reports_a_missing_file_as_input() {
+    let output = run(NAVGEN, &["/nonexistent/dir/map.bsp", "--json"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(json(&output)["kind"], "input");
+}
+
+#[test]
+fn navinfo_analyzes_a_generated_mesh() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let bsp = room_bsp(dir.path());
+    assert!(run(NAVGEN, &[bsp.to_str().expect("utf-8")]).status.success());
+    let nav = dir.path().join("room.nav");
+    let output = run(NAVINFO, &[nav.to_str().expect("utf-8"), "--bsp", bsp.to_str().expect("utf-8")]);
+    assert!(output.status.success(), "stdout: {}", String::from_utf8_lossy(&output.stdout));
+    let report = toon(&output);
+    assert_eq!(report["status"], "ok");
+    assert_eq!(report["analysis"]["areas"]["count"], 1);
+    assert_eq!(report["analysis"]["components"]["count"], 1);
+    assert_eq!(report["bsp"]["matches"], true);
+}
+
+#[test]
+fn navinfo_lists_areas_as_a_table_and_details_one() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let bsp = room_bsp(dir.path());
+    assert!(run(NAVGEN, &[bsp.to_str().expect("utf-8")]).status.success());
+    let nav = dir.path().join("room.nav");
+    let output = run(NAVINFO, &[nav.to_str().expect("utf-8"), "--areas", "--area", "1"]);
+    assert!(output.status.success());
+    let text = String::from_utf8(output.stdout.clone()).expect("utf-8");
+    assert!(text.contains("area_list[1]{id,"), "tabular TOON rows:\n{text}");
+    let report = toon(&output);
+    assert_eq!(report["area_list"][0]["id"], 1);
+    assert_eq!(report["area_details"][0]["id"], 1);
+}
+
+#[test]
+fn navinfo_reports_an_unknown_area_as_input() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let bsp = room_bsp(dir.path());
+    assert!(run(NAVGEN, &[bsp.to_str().expect("utf-8")]).status.success());
+    let nav = dir.path().join("room.nav");
+    let output = run(NAVINFO, &[nav.to_str().expect("utf-8"), "--area", "99", "--json"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(json(&output)["message"].as_str().expect("message").contains("99"));
+}
+
+#[test]
+fn navinfo_reports_a_non_nav_file_as_input() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let junk = dir.path().join("junk.nav");
+    std::fs::write(&junk, b"nope nope nope").expect("written");
+    let output = run(NAVINFO, &[junk.to_str().expect("utf-8")]);
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(toon(&output)["kind"], "input");
+}
