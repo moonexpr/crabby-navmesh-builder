@@ -41,7 +41,7 @@ navinfo out.nav --areas --area 12      # every area as a table row, plus area 12
 |---|---|
 | `-o, --output PATH` | Where to write the `.nav`; defaults to the `.bsp` path with `.nav` |
 | `-b, --build GAME` | The game whose engine loads the mesh: `tf` (default; sub-version 2) or `gmod` (sub-version 0). `hl2`, `css`, and `csgo` are recognized and refused as not supported yet |
-| `--game-dir DIR` | Where to find static props' models: loose files and `*_dir.vpk` (repeatable). Defaults to the directory holding the map's `maps/`, and an `hl2/` beside it; the map's own pakfile always comes first |
+| `--game-dir DIR` | Where to find static props' models: loose files and `*_dir.vpk` (repeatable). Without it, the game is found as [Finding the game](#finding-the-game) describes |
 | `--no-props` | Leave static props out, so the mesh runs through them |
 | `--seed x,y,z` | Extra flood-fill start points (repeatable), used alongside spawn points |
 | `-j, --threads N` | Worker threads; defaults to one per core |
@@ -71,6 +71,38 @@ next_steps[2]: navinfo maps/cp_dustbowl.nav,"in game: nav_analyze, to add hiding
 Failures are reports too, with `status: error`, a `kind`, the message, and its
 causes. The exit code says whose move it is: `0` success, `2` bad input (fix
 the file or arguments), `1` an internal error (please report it).
+
+### Finding the game
+
+Static props' collision models live in the game's files, not the map. The
+map's own pakfile is always read first; the game folders after it come from
+the first of these that gives any:
+
+1. `--game-dir`, as given.
+2. The game the map sits in: for `<game>/maps/<map>.bsp`, `<game>` and an
+   `hl2/` beside it.
+3. A search, run only when a solid prop needs a model:
+   1. The Steam home a previous run found, if it still holds everything.
+   2. Steam's own registry entry (Windows), then the default install paths:
+      `Program Files (x86)\Steam` on Windows; `~/Library/Application Support/Steam`
+      and every CrossOver bottle on macOS; `~/.steam`, `~/.local/share/Steam`,
+      Flatpak, Snap, and `~/.wine` on Linux.
+   3. Source launchers running or on `PATH` (Steam, `hl2`, `tf`, `gmod`,
+      `srcds`), traced up to the Steam home or game install they run from.
+
+   From a Steam home, `libraryfolders.vdf` gives the libraries (Windows paths
+   of a Steam under Wine are read through the bottle's `drive_c`), and
+   `appmanifest_<id>.acf` each game's folder. The build says which games:
+   TF2's `tf` and `hl2` for `tf`, and Garry's Mod's `garrysmod` before them for
+   `gmod`. Of the installs found, the one holding the most wins, and its Steam
+   home is cached: in `HKCU\Software\Crabby Navmesh Builder` on Windows, in
+   user defaults (`io.github.moonexpr.crabby-navmesh-builder`) on macOS, and in
+   `$XDG_CONFIG_HOME/crabby-navmesh-builder/steam-home` elsewhere.
+4. If nothing is found, a terminal is asked for the game's folder; without
+   one, the run fails as bad input (exit 2), naming `--game-dir`.
+
+The report's `props.located` says which step found the game and what became
+of the cache. `--no-props` skips all of this.
 
 ### navgen2
 

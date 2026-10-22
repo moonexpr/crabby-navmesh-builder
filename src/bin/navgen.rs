@@ -9,6 +9,7 @@ use clap::Parser;
 
 use crabby_navmesh_builder::app::generate::{GenerateRequest, generate_nav};
 use crabby_navmesh_builder::app::report::{Format, finish};
+use crabby_navmesh_builder::app::system::SystemLocator;
 use crabby_navmesh_builder::app::{Failure, Length};
 use crabby_navmesh_builder::core::geom::Vec3;
 use crabby_navmesh_builder::spec::Build;
@@ -40,7 +41,8 @@ struct Args {
     #[arg(long)]
     no_props: bool,
     /// A game directory to find prop models in (loose files and *_dir.vpk); repeatable.
-    /// Defaults to the directory holding the map's maps/, and an hl2/ beside it.
+    /// Defaults to the game holding the map's maps/; failing that, the game is searched for
+    /// (a cached Steam home, default install paths, running launchers), then asked for.
     #[arg(long = "game-dir", value_name = "DIR")]
     game_dirs: Vec<PathBuf>,
     /// Report in JSON instead of TOON.
@@ -77,7 +79,7 @@ fn main() -> ExitCode {
         pool = pool.num_threads(n);
     }
     let result = match pool.build().context("starting worker threads") {
-        Ok(pool) => pool.install(|| generate_nav(&request)),
+        Ok(pool) => pool.install(|| generate_nav(&request, &SystemLocator::new())),
         Err(e) => Err(Failure::internal(e)),
     };
     finish(result, format)

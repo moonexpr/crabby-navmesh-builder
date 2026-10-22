@@ -72,6 +72,15 @@ pub enum SpecError {
     Unsupported(Build),
 }
 
+/// A folder of a Steam game's install: `steamapps/common/<install dir>/<folder>`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct GameFolder {
+    /// The game's Steam app id, which names its `appmanifest_<id>.acf`.
+    pub app_id: u32,
+    /// The content folder inside the install, such as `tf` or `hl2`.
+    pub folder: &'static str,
+}
+
 /// Everything particular to one game.
 pub trait GameSpec: fmt::Debug + Send + Sync {
     fn build(&self) -> Build;
@@ -81,6 +90,9 @@ pub trait GameSpec: fmt::Debug + Send + Sync {
 
     /// Which entities block players and which mark where they start.
     fn policy(&self) -> &dyn WorldPolicy;
+
+    /// The installed content a map's props come from, most specific first.
+    fn content(&self) -> &'static [GameFolder];
 
     /// The agent the mesh is generated for.
     fn params(&self) -> Params {
@@ -116,6 +128,14 @@ mod tests {
         for build in [Build::Hl2, Build::Css, Build::Csgo] {
             assert_eq!(build.spec().map(|s| s.build()), Err(SpecError::Unsupported(build)));
         }
+    }
+
+    #[test]
+    fn each_game_names_the_content_its_maps_use() {
+        let folders =
+            |b: Build| b.spec().expect("supported").content().iter().map(|f| (f.app_id, f.folder)).collect::<Vec<_>>();
+        assert_eq!(folders(Build::Tf), vec![(440, "tf"), (440, "hl2")]);
+        assert_eq!(folders(Build::Gmod), vec![(4000, "garrysmod"), (440, "tf"), (440, "hl2")]);
     }
 
     #[test]

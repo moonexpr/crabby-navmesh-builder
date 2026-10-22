@@ -5,7 +5,11 @@ use crate::core::mesh::NavArea;
 use crate::core::world::WorldPolicy;
 use crate::format::nav::NavDialect;
 
-use super::{Build, GameSpec, SourcePolicy};
+use super::tf::TF2;
+use super::{Build, GameFolder, GameSpec, SourcePolicy};
+
+/// Garry's Mod's Steam app id.
+pub const GARRYS_MOD: u32 = 4000;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Gmod;
@@ -33,5 +37,14 @@ impl GameSpec for Gmod {
 
     fn policy(&self) -> &dyn WorldPolicy {
         &SourcePolicy
+    }
+
+    /// Its own content, then TF2's, which GMod mounts for TF2 maps.
+    fn content(&self) -> &'static [GameFolder] {
+        &[
+            GameFolder { app_id: GARRYS_MOD, folder: "garrysmod" },
+            GameFolder { app_id: TF2, folder: "tf" },
+            GameFolder { app_id: TF2, folder: "hl2" },
+        ]
     }
 }

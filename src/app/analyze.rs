@@ -18,6 +18,7 @@ use crate::spec;
 
 use super::Failure;
 use super::content::game_content;
+use super::locate::GameLocator;
 use super::models::ModelLibrary;
 
 /// The `nav_analyze` steps this milestone leaves to the game.
@@ -96,7 +97,7 @@ pub struct ElapsedReport {
     pub total: u128,
 }
 
-pub fn analyze_nav(request: &AnalyzeRequest) -> Result<AnalyzeReport, Failure> {
+pub fn analyze_nav(request: &AnalyzeRequest, locator: &dyn GameLocator) -> Result<AnalyzeReport, Failure> {
     let started = Instant::now();
     let nav_bytes = std::fs::read(&request.nav)
         .with_context(|| format!("reading {}", request.nav.display()))
@@ -115,8 +116,9 @@ pub fn analyze_nav(request: &AnalyzeRequest) -> Result<AnalyzeReport, Failure> {
     let matches = u32::try_from(bsp_bytes.len()).is_ok_and(|n| n == parsed.mesh.bsp_size);
 
     let library = if request.props {
-        let (search, _) = game_content(&bsp_bytes, &bsp_path, &request.game_dirs)?;
-        Some(ModelLibrary::load(&search, map.contents.props()))
+        let props = map.contents.props();
+        let found = game_content(&bsp_bytes, &bsp_path, &request.game_dirs, props, spec.content(), locator)?;
+        Some(ModelLibrary::load(&found.search, props))
     } else {
         None
     };

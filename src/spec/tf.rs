@@ -5,7 +5,10 @@ use crate::core::mesh::NavArea;
 use crate::core::world::WorldPolicy;
 use crate::format::nav::NavDialect;
 
-use super::{Build, GameSpec, SourcePolicy};
+use super::{Build, GameFolder, GameSpec, SourcePolicy};
+
+/// Team Fortress 2's Steam app id.
+pub const TF2: u32 = 440;
 
 /// TF attributes a generated mesh starts with; bots' spawn rooms and the
 /// like are marked in game.
@@ -39,6 +42,10 @@ impl GameSpec for Tf {
 
     fn policy(&self) -> &dyn WorldPolicy {
         &SourcePolicy
+    }
+
+    fn content(&self) -> &'static [GameFolder] {
+        &[GameFolder { app_id: TF2, folder: "tf" }, GameFolder { app_id: TF2, folder: "hl2" }]
     }
 }
 

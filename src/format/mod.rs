@@ -3,3 +3,4 @@
 pub mod bsp;
 pub mod model;
 pub mod nav;
+pub mod steam;

@@ -10,6 +10,7 @@ use clap::Parser;
 use crabby_navmesh_builder::app::Failure;
 use crabby_navmesh_builder::app::analyze::{AnalyzeRequest, analyze_nav};
 use crabby_navmesh_builder::app::report::{Format, finish};
+use crabby_navmesh_builder::app::system::SystemLocator;
 
 #[derive(Parser)]
 #[command(name = "navgen2", version, about = "Crabby Navmesh Builder: analyze a Source .nav as nav_analyze does")]
@@ -51,7 +52,7 @@ fn main() -> ExitCode {
         pool = pool.num_threads(n);
     }
     let result = match pool.build().context("starting worker threads") {
-        Ok(pool) => pool.install(|| analyze_nav(&request)),
+        Ok(pool) => pool.install(|| analyze_nav(&request, &SystemLocator::new())),
         Err(e) => Err(Failure::internal(e)),
     };
     finish(result, format)

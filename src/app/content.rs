@@ -13,7 +13,11 @@ use anyhow::Context;
 
 use crate::format::bsp::{self, normalize_path};
 
+use crate::core::world::{PropCollision, StaticProp};
+use crate::spec::GameFolder;
+
 use super::Failure;
+use super::locate::{GameLocator, Located, choose_game_dirs};
 
 /// A source of game files by path.
 pub trait Content: fmt::Debug + Send + Sync {
@@ -204,13 +208,26 @@ pub fn mount_game_dir(dir: &Path) -> Result<Vec<Box<dyn Content>>, ContentError>
     Ok(sources)
 }
 
+/// Where prop models come from, and how the game folders among them were found.
+pub struct GameContent {
+    pub search: SearchPath,
+    /// Each source, in the order tried.
+    pub described: Vec<String>,
+    /// How the machine search found the game, when it was searched.
+    pub located: Option<Located>,
+}
+
 /// The sources prop models are looked for in: the map's own pakfile, then
-/// each game directory's loose files and VPKs. Also says what each source is.
+/// game folders: those named, else the game the map sits in, else, when a
+/// solid prop needs a model, whatever `locator` finds of `wanted`.
 pub fn game_content(
     bsp_bytes: &[u8],
     bsp_path: &Path,
-    game_dirs: &[PathBuf],
-) -> Result<(SearchPath, Vec<String>), Failure> {
+    named: &[PathBuf],
+    props: &[StaticProp],
+    wanted: &[GameFolder],
+    locator: &dyn GameLocator,
+) -> Result<GameContent, Failure> {
     let mut search = SearchPath::default();
     let mut described = Vec::new();
     let packed = bsp::pakfile_files(bsp_bytes, |path| path.ends_with(".mdl") || path.ends_with(".phy"))
@@ -220,13 +237,15 @@ pub fn game_content(
     described.push(format!("pakfile ({} model files)", pakfile.len()));
     search.push(Box::new(pakfile));
 
-    let dirs = if game_dirs.is_empty() { detected_game_dirs(bsp_path) } else { game_dirs.to_vec() };
+    let needs_models =
+        props.iter().any(|p| matches!(p.collision, PropCollision::VPhysics | PropCollision::BoundingBox));
+    let (dirs, located) = choose_game_dirs(named, detected_game_dirs(bsp_path), needs_models, wanted, locator)?;
     for dir in dirs {
         let sources = mount_game_dir(&dir).map_err(Failure::input)?;
         described.push(format!("{} (loose files and {} VPKs)", dir.display(), sources.len() - 1));
         sources.into_iter().for_each(|s| search.push(s));
     }
-    Ok((search, described))
+    Ok(GameContent { search, described, located })
 }
 
 /// For a map at `<game>/maps/<map>.bsp`: `<game>`, and an `hl2` beside it,

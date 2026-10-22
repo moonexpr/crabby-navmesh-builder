@@ -5,8 +5,10 @@ pub mod analyze;
 pub mod content;
 pub mod generate;
 pub mod inspect;
+pub mod locate;
 pub mod models;
 pub mod report;
+pub mod system;
 
 use serde::Serialize;
 

@@ -15,6 +15,7 @@ use crate::format::{bsp, nav};
 use crate::spec::Build;
 
 use super::content::game_content;
+use super::locate::{GameLocator, Located};
 use super::models::{BrokenModel, ModelLibrary};
 use super::{Failure, Length};
 
@@ -88,6 +89,9 @@ pub struct PropReport {
     pub broken_models: Vec<BrokenModel>,
     /// Where models were looked for, in order.
     pub content: Vec<String>,
+    /// How the game was found, when the machine was searched for it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub located: Option<Located>,
 }
 
 #[derive(Debug, Serialize)]
@@ -108,7 +112,8 @@ pub struct SeedReport {
 }
 
 /// Runs on the current rayon pool; the composition root sizes it.
-pub fn generate_nav(request: &GenerateRequest) -> Result<GenerateReport, Failure> {
+/// `locator` is asked for the game's content only when nothing else names it.
+pub fn generate_nav(request: &GenerateRequest, locator: &dyn GameLocator) -> Result<GenerateReport, Failure> {
     let started = Instant::now();
     let spec = request.build.spec().map_err(Failure::input)?;
     let params = Params {
@@ -125,11 +130,12 @@ pub fn generate_nav(request: &GenerateRequest) -> Result<GenerateReport, Failure
     let map =
         bsp::parse(&bytes).with_context(|| format!("parsing {}", request.bsp.display())).map_err(Failure::input)?;
 
-    let (library, content) = if request.props {
-        let (search, content) = game_content(&bytes, &request.bsp, &request.game_dirs)?;
-        (Some(ModelLibrary::load(&search, map.contents.props())), content)
+    let (library, content, located) = if request.props {
+        let found =
+            game_content(&bytes, &request.bsp, &request.game_dirs, map.contents.props(), spec.content(), locator)?;
+        (Some(ModelLibrary::load(&found.search, map.contents.props())), found.described, found.located)
     } else {
-        (None, Vec::new())
+        (None, Vec::new(), None)
     };
     let world = World::assemble(
         &map.contents,
@@ -145,6 +151,7 @@ pub fn generate_nav(request: &GenerateRequest) -> Result<GenerateReport, Failure
         missing_models: world.props.missing_models.clone(),
         broken_models: library.as_ref().map(|l| l.broken().to_vec()).unwrap_or_default(),
         content,
+        located,
     };
     let seeds: Vec<Vec3> = world.spawns.iter().chain(&request.seeds).copied().collect();
     let map_report = MapReport {
