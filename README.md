@@ -4,11 +4,13 @@ A multi-threaded navigation mesh generator for Source engine maps, written in
 Rust. It reads a compiled map (`.bsp`) and writes the `.nav` file the engine's
 bots load, without launching the game.
 
-Two tools ship together:
+Three tools ship together:
 
 - **`navgen`** builds `MAP.nav` from `MAP.bsp`.
+- **`navgen2`** does what the game's `nav_analyze` does, without the game:
+  hiding spots and each area's visible set, the data TF2's bots read most.
 - **`navinfo`** analyzes any `.nav` (yours or Valve's): counts, connectivity,
-  components, and findings worth acting on.
+  components, hiding spots and visibility, and findings worth acting on.
 
 Both print machine-readable reports on stdout: [TOON](https://toonformat.dev)
 by default, which is compact for LLM agents, or JSON with `--json`.
@@ -70,8 +72,27 @@ Failures are reports too, with `status: error`, a `kind`, the message, and its
 causes. The exit code says whose move it is: `0` success, `2` bad input (fix
 the file or arguments), `1` an internal error (please report it).
 
-After generating, run `nav_analyze` in game to add hiding spots, encounter
-paths, and visibility, which need the running engine.
+### navgen2
+
+```sh
+navgen2 maps/cp_dustbowl.nav             # analyzes in place, against maps/cp_dustbowl.bsp
+navgen2 out.nav --bsp maps/ctf_2fort.bsp -o analyzed.nav --json
+```
+
+It ports `CNavArea::ComputeHidingSpots` (corners with walls on both sides,
+marked in cover or exposed) and `ComputeVisibilityToMesh` (every pair of
+areas within 6000 units, traced from eye height both ways), traced against
+the world as the engine's masks see it: sight through clip brushes,
+windows, and grates, cover behind brushes and props. It keeps the mesh's
+build, writes atomically, and marks the mesh analyzed. Not yet ported:
+encounter spots and earliest occupy times (Counter-Strike's), sniper spots
+(TF2's own meshes have none), and light intensity (skipped on dedicated
+servers too). Valve's optimizing pass, which stores neighboring areas'
+visible sets as deltas, is also not done; sets are written whole.
+
+On `ctf_2fort`, navgen2 finds 402 hiding spots (Valve's mesh has 385) in
+about 5 s on 10 cores. Loaded in Garry's Mod, the engine reports the same
+hiding spots and visible pairs it wrote.
 
 ## How it works
 
@@ -106,7 +127,7 @@ Output does not depend on the thread count. On a 10-core machine, TF2's
   ships them.
 - Prop dynamic entities (`prop_dynamic`, `prop_physics`) do not block, as
   they can move.
-- No ladders, places, or hiding spots; `nav_analyze` adds the latter in game.
+- No ladders or places.
 - A passage narrower than about two grid cells plus the hull width can hold
   walkable samples but no area, which can leave a small island disconnected.
   `navinfo` reports these as components and isolated areas.

@@ -1,6 +1,7 @@
 //! Use cases: each coordinates the seams for one thing a tool does, and
 //! sorts what goes wrong into the caller's fault or ours.
 
+pub mod analyze;
 pub mod content;
 pub mod generate;
 pub mod inspect;

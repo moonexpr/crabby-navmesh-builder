@@ -200,16 +200,8 @@ impl Collision for SolidGrid {
 
     fn trace(&self, half: Vec3, from: Vec3, to: Vec3) -> f32 {
         let reach = half.x.abs().max(half.y.abs());
-        if reach > Self::BUCKET_SIZE {
-            let swept = Aabb::from_center(from, half).union(&Aabb::from_center(to, half));
-            return self
-                .candidates(swept)
-                .into_iter()
-                .filter_map(|i| self.solids[i as usize].sweep_entry(half, from, to))
-                .fold(1.0, f32::min);
-        }
-        // A box no wider than a bucket touches only the buckets around the one its center is in.
-        let ring = if reach > 0.0 { 1 } else { 0 };
+        // A box reaching `ring` buckets past its center touches only the buckets around the center's.
+        let ring = (reach / Self::BUCKET_SIZE).ceil() as i64;
         let mut best = 1.0f32;
         for (cell, exit) in self.cells_along(from, to, ring) {
             for dy in -ring..=ring {

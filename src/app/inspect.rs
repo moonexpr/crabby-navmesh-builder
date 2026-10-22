@@ -58,21 +58,13 @@ pub struct BspCheck {
 #[derive(Debug, Serialize)]
 pub struct SkippedReport {
     pub places: usize,
-    pub hiding_spots: usize,
     pub encounter_paths: usize,
     pub ladders: usize,
-    pub visible_area_entries: usize,
 }
 
 impl From<&Skipped> for SkippedReport {
     fn from(s: &Skipped) -> Self {
-        Self {
-            places: s.places,
-            hiding_spots: s.hiding_spots,
-            encounter_paths: s.encounter_paths,
-            ladders: s.ladders,
-            visible_area_entries: s.visible_area_entries,
-        }
+        Self { places: s.places, encounter_paths: s.encounter_paths, ladders: s.ladders }
     }
 }
 

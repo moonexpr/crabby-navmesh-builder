@@ -6,6 +6,8 @@ pub mod analysis;
 pub mod collision;
 pub mod generate;
 pub mod geom;
+pub mod hiding;
 pub mod mesh;
 pub mod solid;
+pub mod visibility;
 pub mod world;

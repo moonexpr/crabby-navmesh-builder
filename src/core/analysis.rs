@@ -5,13 +5,14 @@ use std::collections::{HashMap, HashSet};
 
 use serde::Serialize;
 
-use crate::core::mesh::{AreaId, Attributes, Direction, NavArea, NavMesh};
+use crate::core::mesh::{AreaId, Attributes, Direction, HidingFlags, NavArea, NavMesh, Visibility};
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct NavAnalysis {
     pub areas: AreaSummary,
     pub connections: ConnectionSummary,
     pub components: ComponentSummary,
+    pub tactics: TacticsSummary,
     /// Findings worth acting on, in plain words; empty when none.
     pub findings: Vec<String>,
 }
@@ -40,6 +41,19 @@ pub struct ConnectionSummary {
     pub one_way: usize,
     /// Connections to ids no area has.
     pub dangling: usize,
+}
+
+/// What analysis (`nav_analyze`, or `navgen2`) added.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct TacticsSummary {
+    pub hiding_spots: usize,
+    pub in_cover: usize,
+    pub sniper_spots: usize,
+    pub areas_with_visibility: usize,
+    pub visible_area_entries: usize,
+    pub completely_visible_entries: usize,
+    /// Areas whose visible set overrides another area's.
+    pub inheriting_areas: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -140,8 +154,25 @@ pub fn analyze(file: &NavMesh) -> NavAnalysis {
         bounds_max,
     };
 
+    let spots = || areas.iter().flat_map(|a| a.hiding_spots().iter());
+    let entries = || areas.iter().flat_map(|a| a.visible_areas().iter());
+    let tactics = TacticsSummary {
+        hiding_spots: spots().count(),
+        in_cover: spots().filter(|s| s.flags.contains(HidingFlags::IN_COVER)).count(),
+        sniper_spots: spots()
+            .filter(|s| {
+                s.flags.contains(HidingFlags::GOOD_SNIPER_SPOT) || s.flags.contains(HidingFlags::IDEAL_SNIPER_SPOT)
+            })
+            .count(),
+        areas_with_visibility: areas.iter().filter(|a| !a.visible_areas().is_empty()).count(),
+        visible_area_entries: entries().count(),
+        completely_visible_entries: entries()
+            .filter(|v| v.visibility.bits() & Visibility::COMPLETELY.bits() != 0)
+            .count(),
+        inheriting_areas: areas.iter().filter(|a| a.inherit_visibility_from().is_some()).count(),
+    };
     let findings = findings(file, &summary, &connections, &components);
-    NavAnalysis { areas: summary, connections, components, findings }
+    NavAnalysis { areas: summary, connections, components, tactics, findings }
 }
 
 fn footprint(area: &NavArea) -> f32 {

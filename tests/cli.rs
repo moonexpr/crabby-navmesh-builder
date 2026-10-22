@@ -257,3 +257,72 @@ fn a_model_found_nowhere_is_reported_missing() {
     assert_eq!(report["props"]["solid"], 0);
     assert_eq!(report["props"]["missing_models"][0], CRATE);
 }
+
+const NAVGEN2: &str = env!("CARGO_BIN_EXE_navgen2");
+
+/// The room's mesh, generated for `build`, beside its `.bsp`.
+fn room_nav(dir: &Path, build: &str) -> (PathBuf, PathBuf) {
+    let bsp = room_bsp(dir);
+    assert!(run(NAVGEN, &[bsp.to_str().expect("utf-8"), "-b", build]).status.success());
+    (bsp.with_extension("nav"), bsp)
+}
+
+#[test]
+fn navgen2_analyzes_a_mesh_in_place() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let (nav, _) = room_nav(dir.path(), "tf");
+    let output = run(NAVGEN2, &[nav.to_str().expect("utf-8"), "--json"]);
+    assert!(output.status.success(), "stdout: {}", String::from_utf8_lossy(&output.stdout));
+    let report = json(&output);
+    assert_eq!(report["status"], "ok");
+    assert_eq!(report["bsp"]["matches"], true);
+    let spots = report["hiding_spots"]["total"].as_u64().expect("count");
+    assert!(spots >= 1, "the room's corners are hiding spots");
+    assert!(report["visibility"]["entries"].as_u64().expect("count") >= 1);
+    assert!(report["steps_not_done"].as_array().expect("list").iter().any(|s| s == "encounter_spots"));
+
+    let info = json(&run(NAVINFO, &[nav.to_str().expect("utf-8"), "--json"]));
+    assert_eq!(info["format"]["analyzed"], true);
+    assert_eq!(info["format"]["build"], "tf");
+    assert_eq!(info["analysis"]["tactics"]["hiding_spots"].as_u64(), Some(spots));
+}
+
+#[test]
+fn navgen2_keeps_the_dialect_and_writes_elsewhere_when_told() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let (nav, bsp) = room_nav(dir.path(), "gmod");
+    let before = std::fs::read(&nav).expect("generated");
+    let out = dir.path().join("analyzed.nav");
+    let args = [
+        nav.to_str().expect("utf-8"),
+        "--bsp",
+        bsp.to_str().expect("utf-8"),
+        "-o",
+        out.to_str().expect("utf-8"),
+        "--json",
+    ];
+    assert!(run(NAVGEN2, &args).status.success());
+    assert_eq!(std::fs::read(&nav).expect("still there"), before, "the input is untouched");
+    let info = json(&run(NAVINFO, &[out.to_str().expect("utf-8"), "--json"]));
+    assert_eq!(info["format"]["build"], "gmod");
+    assert_eq!(info["format"]["analyzed"], true);
+}
+
+#[test]
+fn navgen2_reports_a_map_that_no_longer_matches() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let (nav, bsp) = room_nav(dir.path(), "tf");
+    let mut bytes = std::fs::read(&bsp).expect("map");
+    bytes.extend_from_slice(&[0; 16]);
+    std::fs::write(&bsp, bytes).expect("grown");
+    let report = json(&run(NAVGEN2, &[nav.to_str().expect("utf-8"), "--json"]));
+    assert_eq!(report["status"], "ok");
+    assert_eq!(report["bsp"]["matches"], false);
+}
+
+#[test]
+fn navgen2_reports_a_missing_mesh_as_input() {
+    let output = run(NAVGEN2, &["/nonexistent/map.nav", "--json"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(json(&output)["kind"], "input");
+}

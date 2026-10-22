@@ -9,7 +9,11 @@ use std::path::{Path, PathBuf};
 
 use vformats::vpk::VpkLocation;
 
-use crate::format::bsp::normalize_path;
+use anyhow::Context;
+
+use crate::format::bsp::{self, normalize_path};
+
+use super::Failure;
 
 /// A source of game files by path.
 pub trait Content: fmt::Debug + Send + Sync {
@@ -198,6 +202,48 @@ pub fn mount_game_dir(dir: &Path) -> Result<Vec<Box<dyn Content>>, ContentError>
         sources.push(Box::new(Vpk::open(&vpk)?));
     }
     Ok(sources)
+}
+
+/// The sources prop models are looked for in: the map's own pakfile, then
+/// each game directory's loose files and VPKs. Also says what each source is.
+pub fn game_content(
+    bsp_bytes: &[u8],
+    bsp_path: &Path,
+    game_dirs: &[PathBuf],
+) -> Result<(SearchPath, Vec<String>), Failure> {
+    let mut search = SearchPath::default();
+    let mut described = Vec::new();
+    let packed = bsp::pakfile_files(bsp_bytes, |path| path.ends_with(".mdl") || path.ends_with(".phy"))
+        .with_context(|| format!("reading {}'s pakfile", bsp_path.display()))
+        .map_err(Failure::input)?;
+    let pakfile = Pakfile::new(packed);
+    described.push(format!("pakfile ({} model files)", pakfile.len()));
+    search.push(Box::new(pakfile));
+
+    let dirs = if game_dirs.is_empty() { detected_game_dirs(bsp_path) } else { game_dirs.to_vec() };
+    for dir in dirs {
+        let sources = mount_game_dir(&dir).map_err(Failure::input)?;
+        described.push(format!("{} (loose files and {} VPKs)", dir.display(), sources.len() - 1));
+        sources.into_iter().for_each(|s| search.push(s));
+    }
+    Ok((search, described))
+}
+
+/// For a map at `<game>/maps/<map>.bsp`: `<game>`, and an `hl2` beside it,
+/// which the Source games built on Half-Life 2 mount for shared models.
+pub fn detected_game_dirs(bsp_path: &Path) -> Vec<PathBuf> {
+    let Some(maps) = bsp_path.parent().filter(|p| p.file_name().is_some_and(|n| n.eq_ignore_ascii_case("maps"))) else {
+        return Vec::new();
+    };
+    let Some(game) = maps.parent() else {
+        return Vec::new();
+    };
+    let mut dirs = vec![game.to_path_buf()];
+    let hl2 = game.with_file_name("hl2");
+    if hl2.is_dir() && hl2 != game {
+        dirs.push(hl2);
+    }
+    dirs
 }
 
 #[cfg(test)]

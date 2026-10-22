@@ -12,7 +12,9 @@
 use std::fmt::Debug;
 
 use crate::core::geom::Vec3;
-use crate::core::mesh::{AreaError, AreaId, Attributes, CornerHeights, NavArea, NavMesh};
+use crate::core::mesh::{
+    AreaError, AreaId, Attributes, CornerHeights, HidingFlags, HidingSpot, NavArea, NavMesh, Visibility, VisibleArea,
+};
 
 pub const MAGIC: u32 = 0xFEED_FACE;
 pub const VERSION: u32 = 16;
@@ -34,10 +36,8 @@ pub trait NavDialect: Debug + Send + Sync {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Skipped {
     pub places: usize,
-    pub hiding_spots: usize,
     pub encounter_paths: usize,
     pub ladders: usize,
-    pub visible_area_entries: usize,
 }
 
 /// A parsed file: the mesh, the sub-version it was written at, and what was skipped.
@@ -70,7 +70,6 @@ pub enum NavError {
 const FULL_LIGHT: f32 = 1.0;
 const MAX_NAV_TEAMS: usize = 2;
 const NUM_LADDER_DIRECTIONS: usize = 2;
-const HIDING_SPOT_SIZE: usize = 4 + 12 + 1;
 const LADDER_SIZE: usize = 4 + 4 + 12 + 12 + 4 + 4 + 5 * 4;
 
 /// The mesh as `dialect` writes it.
@@ -108,7 +107,15 @@ fn compile_base_area(area: &NavArea, out: &mut Vec<u8>) {
             put_u32(out, to.get());
         }
     }
-    out.push(0); // hiding spots
+    let spots = area.hiding_spots();
+    out.push(spots.len().min(u8::MAX as usize) as u8);
+    for spot in spots.iter().take(u8::MAX as usize) {
+        put_u32(out, spot.id);
+        for c in [spot.position.x, spot.position.y, spot.position.z] {
+            put_f32(out, c);
+        }
+        out.push(spot.flags.bits());
+    }
     put_u32(out, 0); // encounter paths
     out.extend_from_slice(&0u16.to_le_bytes()); // place
     for _ in 0..NUM_LADDER_DIRECTIONS {
@@ -120,8 +127,12 @@ fn compile_base_area(area: &NavArea, out: &mut Vec<u8>) {
     for _ in 0..4 {
         put_f32(out, FULL_LIGHT);
     }
-    put_u32(out, 0); // potentially visible areas
-    put_u32(out, 0); // inherit visibility from
+    put_u32(out, area.visible_areas().len() as u32);
+    for visible in area.visible_areas() {
+        put_u32(out, visible.area.get());
+        out.push(visible.visibility.bits());
+    }
+    put_u32(out, area.inherit_visibility_from().map_or(0, AreaId::get));
 }
 
 fn put_u32(out: &mut Vec<u8>, v: u32) {
@@ -229,9 +240,14 @@ fn parse_area(r: &mut Reader<'_>, skipped: &mut Skipped) -> Result<NavArea, NavE
         }
     }
 
-    let hiding_spots = r.u8()? as usize;
-    skipped.hiding_spots += hiding_spots;
-    r.counted(hiding_spots, HIDING_SPOT_SIZE)?;
+    let spot_count = r.u8()? as usize;
+    let mut hiding_spots = Vec::with_capacity(spot_count);
+    for _ in 0..spot_count {
+        let id = r.u32()?;
+        let position = r.vec3()?;
+        let flags = HidingFlags::from_bits(r.u8()?);
+        hiding_spots.push(HidingSpot { id, position, flags });
+    }
 
     let encounters = r.u32()? as usize;
     skipped.encounter_paths += encounters;
@@ -248,10 +264,13 @@ fn parse_area(r: &mut Reader<'_>, skipped: &mut Skipped) -> Result<NavArea, NavE
     }
     r.take(MAX_NAV_TEAMS * 4 + 4 * 4)?; // occupy times, corner light
 
-    let visible = r.u32()? as usize;
-    skipped.visible_area_entries += visible;
-    r.counted(visible, 4 + 1)?;
-    r.u32()?; // inherit visibility from
+    let visible_count = r.u32()? as usize;
+    let mut visible_areas = Vec::with_capacity(visible_count.min(r.bytes.len() / 5));
+    for _ in 0..visible_count {
+        let area = r.area_id()?;
+        visible_areas.push(VisibleArea { area, visibility: Visibility::from_bits(r.u8()?) });
+    }
+    let inherit = AreaId::new(r.u32()?);
 
     let heights = CornerHeights {
         north_west: north_west.z,
@@ -259,7 +278,13 @@ fn parse_area(r: &mut Reader<'_>, skipped: &mut Skipped) -> Result<NavArea, NavE
         south_east: south_east.z,
         south_west: south_west_z,
     };
-    Ok(NavArea::new(id, attributes, (north_west.x, north_west.y), (south_east.x, south_east.y), heights, connections)?)
+    let area =
+        NavArea::new(id, attributes, (north_west.x, north_west.y), (south_east.x, south_east.y), heights, connections)?
+            .with_hiding_spots(hiding_spots);
+    Ok(match inherit {
+        Some(from) => area.with_inherited_visibility(from, visible_areas),
+        None => area.with_visible_areas(visible_areas),
+    })
 }
 
 #[cfg(test)]
@@ -380,6 +405,25 @@ mod tests {
             assert_eq!(parsed.mesh, original);
             assert_eq!(parsed.sub_version, dialect.sub_version());
             assert_eq!(parsed.skipped, Skipped::default());
+        }
+    }
+
+    #[test]
+    fn hiding_spots_and_visibility_round_trip() {
+        let analyzed = area(1, (0.0, 0.0), (25.0, 25.0), [vec![], vec![id(2)], vec![], vec![]])
+            .with_hiding_spots(vec![
+                HidingSpot { id: 7, position: Vec3::new(12.5, 12.5, 0.0), flags: HidingFlags::IN_COVER },
+                HidingSpot { id: 8, position: Vec3::new(1.0, 2.0, 3.0), flags: HidingFlags::EXPOSED },
+            ])
+            .with_visible_areas(vec![
+                VisibleArea { area: id(1), visibility: Visibility::COMPLETELY },
+                VisibleArea { area: id(2), visibility: Visibility::POTENTIALLY },
+            ]);
+        let inheriting = area(2, (25.0, 0.0), (50.0, 25.0), Default::default())
+            .with_inherited_visibility(id(1), vec![VisibleArea { area: id(1), visibility: Visibility::NOT_VISIBLE }]);
+        let original = NavMesh { bsp_size: 5, analyzed: true, areas: vec![analyzed, inheriting] };
+        for dialect in [&Base as &dyn NavDialect, &WithTail] {
+            assert_eq!(parse(&compile(&original, dialect), either).expect("parses").mesh, original);
         }
     }
 
