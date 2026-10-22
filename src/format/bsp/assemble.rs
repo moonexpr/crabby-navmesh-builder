@@ -1,14 +1,16 @@
-//! Turns decoded lumps into a [`Map`]: walks each model's BSP tree for its
-//! brushes, keeps those that block players, moves solid brush entities to
-//! their origins, and rebuilds displacements as triangle prisms.
+//! Turns decoded lumps into a [`Map`]: walks every model's BSP tree for the
+//! brushes that block players, and rebuilds displacements as triangle
+//! prisms. Which brush entities stay solid is a game's decision, made later
+//! by `core::world`; this only reports what the map holds.
 
 use std::collections::BTreeSet;
 
-use crate::geom::{Plane, Vec3};
-use crate::solid::{ConvexSolid, SolidError};
+use crate::core::geom::{Plane, Vec3};
+use crate::core::solid::{ConvexSolid, SolidError};
+use crate::core::world::MapContents;
 
 use super::displacement::{DisplacementError, DisplacementSurface};
-use super::entities::{Entity, parse_entities};
+use super::entities::parse_entities;
 use super::lumps::{LumpId, Lumps};
 use super::records::{
     RawBrush, RawBrushSide, RawDispInfo, RawDispVert, RawEdge, RawFace, RawLeaf, RawLeafBrush, RawModel, RawNode,
@@ -16,18 +18,8 @@ use super::records::{
 };
 use super::{BspError, Contents, Map, MapStats};
 
-/// Brush entities that can stand where the map placed them and block
-/// players. Doors, platforms, and team-filtered walls move or open, so the
-/// mesh passes through them as `nav_generate` does; so does any of these
-/// that the map's logic can reach by name or that starts disabled, since a
-/// gate opened mid-round must not split the mesh.
-pub const SOLID_BRUSH_ENTITIES: [&str; 3] = ["func_brush", "func_wall", "func_wall_toggle"];
-
 /// Displacement prisms reach this far behind their surface.
 pub const DISPLACEMENT_THICKNESS: f32 = 4.0;
-
-/// `func_brush`'s "Solidity" value for never solid.
-const NEVER_SOLID: &str = "1";
 
 struct Tables {
     planes: Vec<Plane>,
@@ -61,34 +53,24 @@ pub fn assemble(lumps: &Lumps<'_>) -> Result<Map, BspError> {
     let entities = parse_entities(&String::from_utf8_lossy(&text))?;
     let mut stats = MapStats::default();
 
-    let mut solids = Vec::new();
-    for brush in tables.model_brushes(0)? {
-        if let Some(solid) = tables.brush_solid(brush)? {
-            solids.push(solid);
-            stats.brushes += 1;
-        }
-    }
-    for entity in entities.iter().filter(|e| is_solid_brush_entity(e)) {
-        let model = entity.brush_model.expect("filtered to brush entities");
+    let mut models = Vec::with_capacity(tables.models.len());
+    for model in 0..tables.models.len() {
+        let mut solids = Vec::new();
         for brush in tables.model_brushes(model)? {
             if let Some(solid) = tables.brush_solid(brush)? {
-                solids.push(solid.translated(entity.origin));
+                solids.push(solid);
             }
         }
-        stats.brush_entities += 1;
+        if model == 0 {
+            stats.brushes = solids.len();
+        }
+        models.push(solids);
     }
+    stats.brush_models = models.len().saturating_sub(1);
 
     let prisms = displacement_prisms(lumps, &tables.planes, &mut stats)?;
-    solids.extend(prisms);
-    Ok(Map { version: lumps.version(), entities, solids, stats })
-}
-
-fn is_solid_brush_entity(entity: &Entity) -> bool {
-    SOLID_BRUSH_ENTITIES.contains(&entity.classname.as_str())
-        && entity.brush_model.is_some_and(|m| m > 0)
-        && entity.get("Solidity") != Some(NEVER_SOLID)
-        && entity.get("StartDisabled") != Some("1")
-        && entity.get("targetname").is_none_or(str::is_empty)
+    let contents = MapContents::new(entities, models, prisms)?;
+    Ok(Map { version: lumps.version(), contents, stats })
 }
 
 impl Tables {

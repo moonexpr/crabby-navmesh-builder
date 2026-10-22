@@ -1,6 +1,7 @@
 //! The parse seam for `.bsp` files (versions 19 to 21). [`parse`] is the only
-//! code that reads map bytes; it returns solids that already block players and
-//! typed entities, so nothing downstream re-checks the file.
+//! code that reads map bytes; it returns the map's contents as domain values
+//! (player-blocking brushes by model, displacement prisms, typed entities),
+//! so nothing downstream re-checks the file.
 
 mod assemble;
 mod displacement;
@@ -9,26 +10,26 @@ mod lumps;
 mod records;
 
 pub use displacement::{DisplacementError, DisplacementSurface};
-pub use entities::{Entity, EntityError};
+pub use entities::EntityError;
 pub use lumps::LumpId;
 
-use crate::solid::{ConvexSolid, SolidError};
+use crate::core::solid::SolidError;
+use crate::core::world::{MapContents, WorldError};
 
 /// A compiled map reduced to what navigation needs.
 #[derive(Debug)]
 pub struct Map {
     pub version: u32,
-    pub entities: Vec<Entity>,
-    /// Every solid that blocks a player: world brushes, solid brush
-    /// entities moved to their origins, and displacement prisms.
-    pub solids: Vec<ConvexSolid>,
+    pub contents: MapContents,
     pub stats: MapStats,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct MapStats {
+    /// Player-blocking brushes in the world model.
     pub brushes: usize,
-    pub brush_entities: usize,
+    /// Models besides the world, each a brush entity's.
+    pub brush_models: usize,
     pub displacements: usize,
     pub displacement_triangles: usize,
 }
@@ -78,6 +79,8 @@ pub enum BspError {
     Displacement { index: usize, source: DisplacementError },
     #[error(transparent)]
     Entities(#[from] EntityError),
+    #[error(transparent)]
+    World(#[from] WorldError),
 }
 
 pub fn parse(bytes: &[u8]) -> Result<Map, BspError> {

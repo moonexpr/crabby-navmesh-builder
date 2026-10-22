@@ -1,6 +1,7 @@
 //! The entity lump: `{ "key" "value" ... }` blocks of quoted strings.
 
-use crate::geom::Vec3;
+use crate::core::geom::Vec3;
+use crate::core::world::Entity;
 
 #[derive(Debug, thiserror::Error, PartialEq)]
 pub enum EntityError {
@@ -8,22 +9,6 @@ pub enum EntityError {
     Syntax { at: usize, problem: &'static str },
     #[error("entity {index} ({classname}): origin {value:?} is not three numbers")]
     BadOrigin { index: usize, classname: String, value: String },
-}
-
-/// One entity, with the keys navigation reads already typed.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Entity {
-    pub classname: String,
-    pub origin: Vec3,
-    /// The brush model index from a `"model" "*N"` key.
-    pub brush_model: Option<usize>,
-    keys: Vec<(String, String)>,
-}
-
-impl Entity {
-    pub fn get(&self, key: &str) -> Option<&str> {
-        self.keys.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str())
-    }
 }
 
 /// Parses the whole entity lump. Missing `origin` means the world origin.
@@ -46,26 +31,24 @@ pub fn parse_entities(text: &str) -> Result<Vec<Entity>, EntityError> {
                 None => return Err(tokens.error("entity is never closed")),
             }
         }
-        entities.push(Entity::from_keys(entities.len(), keys)?);
+        entities.push(entity_from_keys(entities.len(), keys)?);
     }
     Ok(entities)
 }
 
-impl Entity {
-    fn from_keys(index: usize, keys: Vec<(String, String)>) -> Result<Self, EntityError> {
-        let lookup = |name: &str| keys.iter().find(|(k, _)| k == name).map(|(_, v)| v.as_str());
-        let classname = lookup("classname").unwrap_or_default().to_string();
-        let origin = match lookup("origin") {
-            None => Vec3::ZERO,
-            Some(value) => parse_origin(value).ok_or_else(|| EntityError::BadOrigin {
-                index,
-                classname: classname.clone(),
-                value: value.to_string(),
-            })?,
-        };
-        let brush_model = lookup("model").and_then(|m| m.strip_prefix('*')).and_then(|n| n.parse().ok());
-        Ok(Self { classname, origin, brush_model, keys })
-    }
+fn entity_from_keys(index: usize, keys: Vec<(String, String)>) -> Result<Entity, EntityError> {
+    let lookup = |name: &str| keys.iter().find(|(k, _)| k == name).map(|(_, v)| v.as_str());
+    let classname = lookup("classname").unwrap_or_default().to_string();
+    let origin = match lookup("origin") {
+        None => Vec3::ZERO,
+        Some(value) => parse_origin(value).ok_or_else(|| EntityError::BadOrigin {
+            index,
+            classname: classname.clone(),
+            value: value.to_string(),
+        })?,
+    };
+    let brush_model = lookup("model").and_then(|m| m.strip_prefix('*')).and_then(|n| n.parse().ok());
+    Ok(Entity::new(classname, origin, brush_model, keys))
 }
 
 fn parse_origin(value: &str) -> Option<Vec3> {

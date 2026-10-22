@@ -1,7 +1,7 @@
 //! Which samples a player starting at a seed can reach.
 
-use crate::geom::Vec3;
-use crate::nav::Direction;
+use crate::core::geom::Vec3;
+use crate::core::mesh::Direction;
 
 use super::Params;
 use super::heightfield::{Heightfield, SampleId};

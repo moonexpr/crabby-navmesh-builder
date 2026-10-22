@@ -2,17 +2,17 @@ mod support;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use crabby_navmesh_builder::generate::{GenerateError, Params, generate};
-use crabby_navmesh_builder::geom::Vec3;
-use crabby_navmesh_builder::nav::{Attributes, Direction, NavArea};
+use crabby_navmesh_builder::core::generate::{GenerateError, Params, generate};
+use crabby_navmesh_builder::core::geom::Vec3;
+use crabby_navmesh_builder::core::mesh::{Attributes, Direction, NavArea};
 
 use support::{area_at, connects, solid, world};
 
-fn floor() -> crabby_navmesh_builder::solid::ConvexSolid {
+fn floor() -> crabby_navmesh_builder::core::solid::ConvexSolid {
     solid((0.0, 0.0, -16.0), (500.0, 500.0, 0.0))
 }
 
-fn areas(solids: Vec<crabby_navmesh_builder::solid::ConvexSolid>, seeds: &[Vec3]) -> Vec<NavArea> {
+fn areas(solids: Vec<crabby_navmesh_builder::core::solid::ConvexSolid>, seeds: &[Vec3]) -> Vec<NavArea> {
     generate(&world(solids), seeds, &Params::default()).expect("generates").areas
 }
 

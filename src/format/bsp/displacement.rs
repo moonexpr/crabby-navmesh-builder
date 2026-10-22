@@ -3,7 +3,7 @@
 //! `startPosition`, then vertex `(i, j)` (index `i * n + j`) sits at
 //! `lerp(lerp(p0, p1, i), lerp(p3, p2, i), j)` plus its offset.
 
-use crate::geom::Vec3;
+use crate::core::geom::Vec3;
 
 #[derive(Debug, thiserror::Error, PartialEq)]
 pub enum DisplacementError {

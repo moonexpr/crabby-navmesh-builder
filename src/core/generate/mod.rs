@@ -15,9 +15,9 @@ pub mod links;
 pub mod merge;
 pub mod reach;
 
-use crate::collision::Collision;
-use crate::geom::Vec3;
-use crate::nav::{AreaId, Attributes, CornerHeights, NavArea};
+use crate::core::collision::Collision;
+use crate::core::geom::Vec3;
+use crate::core::mesh::{AreaId, Attributes, CornerHeights, NavArea};
 
 use heightfield::Heightfield;
 use links::Links;

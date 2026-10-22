@@ -2,8 +2,8 @@
 //! overlap and sweep tests. [`SolidGrid`] answers these over a set of convex
 //! solids, bucketed into a 2D grid so each query touches only nearby solids.
 
-use crate::geom::{Aabb, Vec3};
-use crate::solid::{ConvexSolid, Span};
+use crate::core::geom::{Aabb, Vec3};
+use crate::core::solid::{ConvexSolid, Span};
 
 /// What the generator needs from the world. `Sync` so that queries can run
 /// from many threads at once.

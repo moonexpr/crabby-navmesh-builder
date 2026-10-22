@@ -3,7 +3,7 @@
 
 use std::fmt;
 
-use crate::geom::{Aabb, Plane, Vec3};
+use crate::core::geom::{Aabb, Plane, Vec3};
 
 /// Distances within this many units count as touching rather than overlapping.
 pub const CONTACT_EPSILON: f32 = 0.01;

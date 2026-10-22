@@ -4,9 +4,9 @@
 
 use rayon::prelude::*;
 
-use crate::collision::Collision;
-use crate::geom::Vec3;
-use crate::nav::Direction;
+use crate::core::collision::Collision;
+use crate::core::geom::Vec3;
+use crate::core::mesh::Direction;
 
 use super::Params;
 use super::heightfield::{Heightfield, SampleId};
@@ -117,10 +117,10 @@ fn path_clear(world: &dyn Collision, field: &Heightfield, params: &Params, from:
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::collision::SolidGrid;
-    use crate::generate::heightfield::Column;
-    use crate::geom::{Aabb, Vec3};
-    use crate::solid::ConvexSolid;
+    use crate::core::collision::SolidGrid;
+    use crate::core::generate::heightfield::Column;
+    use crate::core::geom::{Aabb, Vec3};
+    use crate::core::solid::ConvexSolid;
 
     fn solid(min: (f32, f32, f32), max: (f32, f32, f32)) -> ConvexSolid {
         ConvexSolid::axis_box(Aabb::from_corners(Vec3::new(min.0, min.1, min.2), Vec3::new(max.0, max.1, max.2)))

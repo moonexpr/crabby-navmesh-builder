@@ -5,25 +5,15 @@ use std::collections::{HashMap, HashSet};
 
 use serde::Serialize;
 
-use crate::nav::{AreaId, Attributes, Direction, NavArea, NavFile, Skipped, TF_SUB_VERSION, VERSION};
+use crate::core::mesh::{AreaId, Attributes, Direction, NavArea, NavMesh};
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct NavAnalysis {
-    pub format: FormatSummary,
     pub areas: AreaSummary,
     pub connections: ConnectionSummary,
     pub components: ComponentSummary,
-    pub skipped: SkippedSummary,
     /// Findings worth acting on, in plain words; empty when none.
     pub findings: Vec<String>,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct FormatSummary {
-    pub version: u32,
-    pub sub_version: u32,
-    pub analyzed: bool,
-    pub bsp_size: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -61,15 +51,6 @@ pub struct ComponentSummary {
     pub isolated: usize,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct SkippedSummary {
-    pub places: usize,
-    pub hiding_spots: usize,
-    pub encounter_paths: usize,
-    pub ladders: usize,
-    pub visible_area_entries: usize,
-}
-
 /// One area as a flat table row, for `navinfo --areas`.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct AreaRow {
@@ -104,7 +85,7 @@ pub struct AreaDetail {
     pub west: Vec<u32>,
 }
 
-pub fn analyze(file: &NavFile, skipped: &Skipped) -> NavAnalysis {
+pub fn analyze(file: &NavMesh) -> NavAnalysis {
     let areas = &file.areas;
     let index: HashMap<AreaId, usize> = areas.iter().enumerate().map(|(i, a)| (a.id(), i)).collect();
     let targets = |a: &NavArea| -> Vec<AreaId> {
@@ -160,25 +141,7 @@ pub fn analyze(file: &NavFile, skipped: &Skipped) -> NavAnalysis {
     };
 
     let findings = findings(file, &summary, &connections, &components);
-    NavAnalysis {
-        format: FormatSummary {
-            version: VERSION,
-            sub_version: TF_SUB_VERSION,
-            analyzed: file.analyzed,
-            bsp_size: file.bsp_size,
-        },
-        areas: summary,
-        connections,
-        components,
-        skipped: SkippedSummary {
-            places: skipped.places,
-            hiding_spots: skipped.hiding_spots,
-            encounter_paths: skipped.encounter_paths,
-            ladders: skipped.ladders,
-            visible_area_entries: skipped.visible_area_entries,
-        },
-        findings,
-    }
+    NavAnalysis { areas: summary, connections, components, findings }
 }
 
 fn footprint(area: &NavArea) -> f32 {
@@ -217,7 +180,7 @@ fn components(neighbors: &[Vec<usize>]) -> ComponentSummary {
 }
 
 fn findings(
-    file: &NavFile,
+    file: &NavMesh,
     areas: &AreaSummary,
     connections: &ConnectionSummary,
     components: &ComponentSummary,
@@ -296,7 +259,7 @@ pub fn find_area(areas: &[NavArea], id: AreaId) -> Option<&NavArea> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::nav::CornerHeights;
+    use crate::core::mesh::CornerHeights;
 
     fn id(n: u32) -> AreaId {
         AreaId::new(n).expect("nonzero")
@@ -307,13 +270,13 @@ mod tests {
         NavArea::new(id(n), attributes, (x, 0.0), (x + 50.0, 25.0), flat, connections).expect("valid")
     }
 
-    fn file(areas: Vec<NavArea>) -> NavFile {
-        NavFile { bsp_size: 10, analyzed: false, areas }
+    fn file(areas: Vec<NavArea>) -> NavMesh {
+        NavMesh { bsp_size: 10, analyzed: false, areas }
     }
 
     #[test]
     fn an_empty_mesh_reports_zeroes_and_says_so() {
-        let report = analyze(&file(vec![]), &Skipped::default());
+        let report = analyze(&file(vec![]));
         assert_eq!(report.areas.count, 0);
         assert_eq!(report.areas.median, None);
         assert_eq!(report.components.count, 0);
@@ -327,7 +290,7 @@ mod tests {
             area(2, 50.0, Attributes::NONE, [vec![], vec![id(3)], vec![], vec![id(1)]]),
             area(3, 100.0, Attributes::CROUCH, Default::default()),
         ];
-        let report = analyze(&file(areas), &Skipped::default());
+        let report = analyze(&file(areas));
         assert_eq!(report.connections.total, 3);
         assert_eq!(report.connections.two_way_pairs, 1);
         assert_eq!(report.connections.one_way, 1);
@@ -342,7 +305,7 @@ mod tests {
             area(1, 0.0, Attributes::NONE, [vec![], vec![id(9)], vec![], vec![]]),
             area(2, 500.0, Attributes::NONE, Default::default()),
         ];
-        let report = analyze(&file(areas), &Skipped::default());
+        let report = analyze(&file(areas));
         assert_eq!(report.connections.dangling, 1);
         assert_eq!(report.components.count, 2);
         assert_eq!(report.components.isolated, 2, "a dangling link leads nowhere");
@@ -364,7 +327,7 @@ mod tests {
             )
             .expect("valid"),
         ];
-        let report = analyze(&file(areas), &Skipped::default());
+        let report = analyze(&file(areas));
         assert_eq!(report.areas.floor_area, 1250.0 + 10000.0);
         assert_eq!(report.areas.smallest, Some(1250.0));
         assert_eq!(report.areas.largest, Some(10000.0));

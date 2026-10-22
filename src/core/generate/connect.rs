@@ -7,7 +7,7 @@ use std::collections::HashSet;
 
 use rayon::prelude::*;
 
-use crate::nav::Direction;
+use crate::core::mesh::Direction;
 
 use super::heightfield::SampleId;
 use super::links::Links;

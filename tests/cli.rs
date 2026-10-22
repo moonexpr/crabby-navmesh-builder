@@ -3,7 +3,7 @@ mod support;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-use crabby_navmesh_builder::geom::Vec3;
+use crabby_navmesh_builder::core::geom::Vec3;
 use serde_json::Value;
 
 use support::bsp_writer::{BspWriter, CONTENTS_SOLID};
@@ -130,4 +130,50 @@ fn navinfo_reports_a_non_nav_file_as_input() {
     let output = run(NAVINFO, &[junk.to_str().expect("utf-8")]);
     assert_eq!(output.status.code(), Some(2));
     assert_eq!(toon(&output)["kind"], "input");
+}
+
+#[test]
+fn navgen_targets_tf_unless_told_otherwise() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let bsp = room_bsp(dir.path());
+    let report = json(&run(NAVGEN, &[bsp.to_str().expect("utf-8"), "--json"]));
+    assert_eq!(report["build"], "tf");
+    assert_eq!(report["nav"]["sub_version"], 2);
+}
+
+#[test]
+fn navgen_writes_the_gmod_dialect_that_navinfo_recognizes() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let bsp = room_bsp(dir.path());
+    let output = run(NAVGEN, &[bsp.to_str().expect("utf-8"), "-b", "gmod", "--json"]);
+    assert!(output.status.success(), "stdout: {}", String::from_utf8_lossy(&output.stdout));
+    let report = json(&output);
+    assert_eq!(report["build"], "gmod");
+    assert_eq!(report["nav"]["sub_version"], 0);
+    let nav = dir.path().join("room.nav");
+    let info = json(&run(NAVINFO, &[nav.to_str().expect("utf-8"), "--json"]));
+    assert_eq!(info["format"]["build"], "gmod");
+    assert_eq!(info["format"]["sub_version"], 0);
+    assert_eq!(info["analysis"]["areas"]["count"], 1);
+}
+
+#[test]
+fn navgen_refuses_a_build_that_is_not_supported_yet_as_input() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let bsp = room_bsp(dir.path());
+    let output = run(NAVGEN, &[bsp.to_str().expect("utf-8"), "--build", "css"]);
+    assert_eq!(output.status.code(), Some(2));
+    let report = toon(&output);
+    assert_eq!(report["kind"], "input");
+    assert!(report["message"].as_str().expect("message").contains("not supported yet"));
+    assert!(!dir.path().join("room.nav").exists(), "nothing is written for a refused build");
+}
+
+#[test]
+fn navgen_refuses_a_cell_size_that_is_not_a_positive_distance() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let bsp = room_bsp(dir.path());
+    let output = run(NAVGEN, &[bsp.to_str().expect("utf-8"), "--cell-size", "0"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("positive distance"));
 }

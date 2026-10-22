@@ -1,17 +1,12 @@
 //! Crabby Navmesh Builder: generates Source engine navigation meshes
-//! (`.nav`) from compiled maps (`.bsp`).
+//! (`.nav`) from compiled maps (`.bsp`), and analyzes them.
 //!
-//! The pipeline is `bsp::parse` (raw bytes to valid solids and entities), a
-//! [`collision::Collision`] world built from those solids, `generate::generate`
-//! (a multi-threaded heightfield-to-areas pass), and `nav::encode`.
-//! `analysis` and `report` back the `navinfo` and `navgen` tools' output.
+//! Three layers (see `docs/architecture.md`): `core` holds the math, the
+//! domain values, and the algorithms; `format` parses and compiles bytes and
+//! `spec` says what each game expects; `app` runs the tools' use cases and
+//! renders their reports.
 
-pub mod analysis;
-pub mod bsp;
-pub mod cli;
-pub mod collision;
-pub mod generate;
-pub mod geom;
-pub mod nav;
-pub mod report;
-pub mod solid;
+pub mod app;
+pub mod core;
+pub mod format;
+pub mod spec;

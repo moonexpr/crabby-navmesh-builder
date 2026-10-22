@@ -26,7 +26,8 @@ cargo install --git https://github.com/moonexpr/crabby-navmesh-builder
 ## Use
 
 ```sh
-navgen maps/cp_dustbowl.bsp            # writes maps/cp_dustbowl.nav
+navgen maps/cp_dustbowl.bsp            # writes maps/cp_dustbowl.nav for TF2
+navgen maps/cp_dustbowl.bsp -b gmod     # the same mesh in the layout Garry's Mod loads
 navgen maps/ctf_2fort.bsp -o out.nav --json
 navinfo maps/cp_dustbowl.nav --bsp maps/cp_dustbowl.bsp
 navinfo out.nav --areas --area 12      # every area as a table row, plus area 12 in full
@@ -37,6 +38,7 @@ navinfo out.nav --areas --area 12      # every area as a table row, plus area 12
 | Option | Meaning |
 |---|---|
 | `-o, --output PATH` | Where to write the `.nav`; defaults to the `.bsp` path with `.nav` |
+| `-b, --build GAME` | The game whose engine loads the mesh: `tf` (default; sub-version 2) or `gmod` (sub-version 0). `hl2`, `css`, and `csgo` are recognized and refused as not supported yet |
 | `--seed x,y,z` | Extra flood-fill start points (repeatable), used alongside spawn points |
 | `-j, --threads N` | Worker threads; defaults to one per core |
 | `--cell-size N` | Sampling grid spacing in units (default 25, as `nav_generate`) |
@@ -74,8 +76,9 @@ paths, and visibility, which need the running engine.
 1. **Parse.** BSP versions 19 to 21, including LZMA-compressed lumps. Brushes
    that block players (`MASK_PLAYERSOLID_BRUSHONLY`) come from each model's BSP
    tree; displacements are rebuilt the way `CCoreDispInfo` does and become thin
-   triangle prisms. Brush entities that stay put (`func_brush`, `func_wall`)
-   are solid; doors, and anything the map's logic can toggle by name, are not.
+   triangle prisms. The game's spec then decides what blocks: brush entities
+   that stay put (`func_brush`, `func_wall`) are solid; doors, and anything
+   the map's logic can toggle by name, are not.
 2. **Sample** (parallel). Every 25-unit grid column is cast through the world
    to find each floor where a 32-unit-wide player hull fits, standing or
    crouching, on slopes up to `nav_slope_limit`.
@@ -99,7 +102,14 @@ Output does not depend on the thread count. On a 10-core machine, TF2's
 - A passage narrower than about two grid cells plus the hull width can hold
   walkable samples but no area, which can leave a small island disconnected.
   `navinfo` reports these as components and isolated areas.
-- The output targets TF2's format (nav version 16, sub-version 2).
+- Nav version 16 only, for TF2 (sub-version 2) and Garry's Mod (sub-version 0).
+
+## Design
+
+The code is three layers, `core` (math, world, mesh, generation, analysis),
+`format` and `spec` (parsers and compiler; what each game expects), and `app`
+(the tools' use cases and reports). See [docs/architecture.md](docs/architecture.md),
+which also says how to add a game.
 
 ## Develop
 

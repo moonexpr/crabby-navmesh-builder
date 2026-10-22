@@ -5,8 +5,8 @@ use std::ops::Range;
 
 use rayon::prelude::*;
 
-use crate::collision::Collision;
-use crate::geom::{Aabb, Vec3};
+use crate::core::collision::Collision;
+use crate::core::geom::{Aabb, Vec3};
 
 use super::Params;
 
@@ -218,8 +218,8 @@ impl Heightfield {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::collision::SolidGrid;
-    use crate::solid::ConvexSolid;
+    use crate::core::collision::SolidGrid;
+    use crate::core::solid::ConvexSolid;
 
     fn solid(min: (f32, f32, f32), max: (f32, f32, f32)) -> ConvexSolid {
         ConvexSolid::axis_box(Aabb::from_corners(Vec3::new(min.0, min.1, min.2), Vec3::new(max.0, max.1, max.2)))
@@ -276,7 +276,7 @@ mod tests {
     fn a_floor_steeper_than_the_slope_limit_is_not_walkable() {
         let steep = Vec3::new(-1.0, 0.0, 0.5).try_normalize().expect("nonzero");
         let mut planes = solid((0.0, 0.0, -100.0), (200.0, 200.0, 300.0)).planes().to_vec();
-        planes.push(crate::geom::Plane { normal: steep, dist: 0.0 });
+        planes.push(crate::core::geom::Plane { normal: steep, dist: 0.0 });
         let wedge = ConvexSolid::new(planes).expect("bounded");
         let world = SolidGrid::new(vec![wedge]).expect("solid");
         assert!(floors(&world, 50.0, 100.0, &Params::default()).is_empty());

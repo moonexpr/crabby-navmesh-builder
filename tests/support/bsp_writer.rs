@@ -1,7 +1,7 @@
 //! Writes small but well-formed BSP files for parser tests. Each model gets
 //! one node whose children both lead to one leaf listing the model's brushes.
 
-use crabby_navmesh_builder::geom::{Plane, Vec3};
+use crabby_navmesh_builder::core::geom::{Plane, Vec3};
 
 pub const CONTENTS_SOLID: u32 = 0x1;
 pub const CONTENTS_WATER: u32 = 0x20;

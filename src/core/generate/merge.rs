@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 
-use crate::nav::Direction;
+use crate::core::mesh::Direction;
 
 use super::Params;
 use super::heightfield::{Heightfield, SampleId};

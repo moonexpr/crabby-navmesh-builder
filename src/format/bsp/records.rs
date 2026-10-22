@@ -1,7 +1,7 @@
 //! Fixed-size lump records, decoded field by field from little-endian bytes.
 //! These mirror the `bspfile.h` structs but keep only the fields used here.
 
-use crate::geom::{Plane, Vec3};
+use crate::core::geom::{Plane, Vec3};
 
 use super::BspError;
 use super::lumps::LumpId;
