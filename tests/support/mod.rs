@@ -33,3 +33,17 @@ pub fn area_at(areas: &[NavArea], x: f32, y: f32, z: f32) -> Option<&NavArea> {
 pub fn connects(from: &NavArea, to: &NavArea) -> bool {
     Direction::ALL.iter().any(|d| from.connections(*d).contains(&to.id()))
 }
+
+/// A studio model header carrying only this hull box, enough for a
+/// `SOLID_BBOX` prop.
+pub fn mdl_with_hull(min: Vec3, max: Vec3) -> Vec<u8> {
+    const HULL_OFFSET: usize = 4 + 4 + 4 + 64 + 4 + 12 + 12;
+    let mut bytes = vec![0u8; HULL_OFFSET + 24 + 64];
+    bytes[0..4].copy_from_slice(b"IDST");
+    bytes[4..8].copy_from_slice(&48i32.to_le_bytes());
+    for (i, v) in [min.x, min.y, min.z, max.x, max.y, max.z].iter().enumerate() {
+        let at = HULL_OFFSET + i * 4;
+        bytes[at..at + 4].copy_from_slice(&v.to_le_bytes());
+    }
+    bytes
+}

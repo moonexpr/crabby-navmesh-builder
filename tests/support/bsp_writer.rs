@@ -19,7 +19,21 @@ pub struct BspWriter {
     models: Vec<Vec<u16>>,
     entities: String,
     displacements: Vec<Displacement>,
+    props: Vec<Prop>,
+    pakfile: Vec<(String, Vec<u8>)>,
 }
+
+/// A `prop_static`: model path, origin, `[pitch, yaw, roll]`, solid type.
+pub struct Prop {
+    pub model: String,
+    pub origin: Vec3,
+    pub angles: [f32; 3],
+    pub solid: u8,
+}
+
+pub const SOLID_NONE: u8 = 0;
+pub const SOLID_BBOX: u8 = 2;
+pub const SOLID_VPHYSICS: u8 = 6;
 
 impl Default for BspWriter {
     fn default() -> Self {
@@ -35,7 +49,18 @@ impl BspWriter {
             models: vec![vec![]],
             entities: "{\n\"classname\" \"worldspawn\"\n}\n".to_string(),
             displacements: vec![],
+            props: vec![],
+            pakfile: vec![],
         }
+    }
+
+    pub fn static_prop(&mut self, model: &str, origin: Vec3, angles: [f32; 3], solid: u8) {
+        self.props.push(Prop { model: model.to_string(), origin, angles, solid });
+    }
+
+    /// A file stored (uncompressed) in the map's pakfile.
+    pub fn pack(&mut self, path: &str, bytes: &[u8]) {
+        self.pakfile.push((path.to_string(), bytes.to_vec()));
     }
 
     pub fn add_model(&mut self) -> usize {
@@ -174,20 +199,120 @@ impl BspWriter {
         lumps.push((19, sides));
         lumps.push((26, infos));
         lumps.push((33, verts));
+        if !self.pakfile.is_empty() {
+            lumps.push((40, zip_store(&self.pakfile)));
+        }
 
         let header_size = 8 + 64 * 16 + 4;
         let mut out = vec![0u8; header_size];
         out[0..4].copy_from_slice(b"VBSP");
         out[4..8].copy_from_slice(&version.to_le_bytes());
-        for (index, data) in lumps {
+        if !self.props.is_empty() {
+            lumps.push((35, self.game_lump()));
+        }
+        for (index, mut data) in lumps {
             let entry = 8 + index * 16;
             let offset = out.len() as u32;
+            if index == 35 {
+                // dgamelump_t::fileofs is absolute: the sprp data follows the one-entry directory.
+                data[12..16].copy_from_slice(&(offset + 4 + 16).to_le_bytes());
+            }
             out[entry..entry + 4].copy_from_slice(&offset.to_le_bytes());
             out[entry + 4..entry + 8].copy_from_slice(&(data.len() as u32).to_le_bytes());
             out.extend_from_slice(&data);
         }
         out
     }
+}
+
+impl BspWriter {
+    /// Game lump 35 holding one `sprp` sub-lump at version 6 (64-byte records).
+    fn game_lump(&self) -> Vec<u8> {
+        let mut names: Vec<&str> = self.props.iter().map(|p| p.model.as_str()).collect();
+        names.sort_unstable();
+        names.dedup();
+        let mut sprp = Vec::new();
+        put_i32(&mut sprp, names.len() as i32);
+        for name in &names {
+            let mut fixed = [0u8; 128];
+            fixed[..name.len()].copy_from_slice(name.as_bytes());
+            sprp.extend_from_slice(&fixed);
+        }
+        put_i32(&mut sprp, 0); // leaves
+        put_i32(&mut sprp, self.props.len() as i32);
+        for prop in &self.props {
+            put_vec(&mut sprp, prop.origin);
+            for a in prop.angles {
+                put_f32(&mut sprp, a);
+            }
+            put_u16(&mut sprp, names.iter().position(|n| *n == prop.model).expect("named") as u16);
+            put_u16(&mut sprp, 0); // first leaf
+            put_u16(&mut sprp, 0); // leaf count
+            sprp.push(prop.solid);
+            sprp.push(0); // flags
+            put_i32(&mut sprp, 0); // skin
+            put_f32(&mut sprp, 0.0); // fade min
+            put_f32(&mut sprp, 0.0); // fade max
+            put_vec(&mut sprp, Vec3::ZERO); // lighting origin
+            put_f32(&mut sprp, 1.0); // forced fade scale
+            put_u16(&mut sprp, 0); // min DX level
+            put_u16(&mut sprp, 0); // max DX level
+        }
+        let mut lump = Vec::new();
+        put_i32(&mut lump, 1);
+        lump.extend_from_slice(&i32::from_be_bytes(*b"sprp").to_le_bytes());
+        put_u16(&mut lump, 0); // flags
+        put_u16(&mut lump, 6); // version
+        put_i32(&mut lump, 0); // fileofs, patched where the lump lands
+        put_i32(&mut lump, sprp.len() as i32);
+        lump.extend_from_slice(&sprp);
+        lump
+    }
+}
+
+/// A ZIP archive of stored entries, as `bspzip` writes a pakfile.
+fn zip_store(files: &[(String, Vec<u8>)]) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut central = Vec::new();
+    for (name, data) in files {
+        let crc = vformats::crc32_ieee(data);
+        let local = out.len() as u32;
+        put_u32(&mut out, 0x0403_4b50);
+        for v in [20u16, 0, 0, 0, 0] {
+            put_u16(&mut out, v);
+        }
+        for v in [crc, data.len() as u32, data.len() as u32] {
+            put_u32(&mut out, v);
+        }
+        put_u16(&mut out, name.len() as u16);
+        put_u16(&mut out, 0);
+        out.extend_from_slice(name.as_bytes());
+        out.extend_from_slice(data);
+
+        put_u32(&mut central, 0x0201_4b50);
+        for v in [20u16, 20, 0, 0, 0, 0] {
+            put_u16(&mut central, v);
+        }
+        for v in [crc, data.len() as u32, data.len() as u32] {
+            put_u32(&mut central, v);
+        }
+        for v in [name.len() as u16, 0, 0, 0, 0] {
+            put_u16(&mut central, v);
+        }
+        put_u32(&mut central, 0);
+        put_u32(&mut central, local);
+        central.extend_from_slice(name.as_bytes());
+    }
+    let central_at = out.len() as u32;
+    out.extend_from_slice(&central);
+    put_u32(&mut out, 0x0605_4b50);
+    for v in [0u16, 0, files.len() as u16, files.len() as u16] {
+        put_u16(&mut out, v);
+    }
+    put_u32(&mut out, central.len() as u32);
+    put_u32(&mut out, central_at);
+    put_u16(&mut out, 0);
+    out
 }
 
 pub fn box_planes(min: Vec3, max: Vec3) -> Vec<Plane> {

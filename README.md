@@ -39,6 +39,8 @@ navinfo out.nav --areas --area 12      # every area as a table row, plus area 12
 |---|---|
 | `-o, --output PATH` | Where to write the `.nav`; defaults to the `.bsp` path with `.nav` |
 | `-b, --build GAME` | The game whose engine loads the mesh: `tf` (default; sub-version 2) or `gmod` (sub-version 0). `hl2`, `css`, and `csgo` are recognized and refused as not supported yet |
+| `--game-dir DIR` | Where to find static props' models: loose files and `*_dir.vpk` (repeatable). Defaults to the directory holding the map's `maps/`, and an `hl2/` beside it; the map's own pakfile always comes first |
+| `--no-props` | Leave static props out, so the mesh runs through them |
 | `--seed x,y,z` | Extra flood-fill start points (repeatable), used alongside spawn points |
 | `-j, --threads N` | Worker threads; defaults to one per core |
 | `--cell-size N` | Sampling grid spacing in units (default 25, as `nav_generate`) |
@@ -78,7 +80,10 @@ paths, and visibility, which need the running engine.
    tree; displacements are rebuilt the way `CCoreDispInfo` does and become thin
    triangle prisms. The game's spec then decides what blocks: brush entities
    that stay put (`func_brush`, `func_wall`) are solid; doors, and anything
-   the map's logic can toggle by name, are not.
+   the map's logic can toggle by name, are not. Static props collide as the
+   engine has them: `SOLID_VPHYSICS` props by their `.phy` hulls (read from
+   the pakfile, loose files, or VPKs), `SOLID_BBOX` props by their model's
+   hull box, each placed with Valve's `AngleMatrix`.
 2. **Sample** (parallel). Every 25-unit grid column is cast through the world
    to find each floor where a 32-unit-wide player hull fits, standing or
    crouching, on slopes up to `nav_slope_limit`.
@@ -96,8 +101,11 @@ Output does not depend on the thread count. On a 10-core machine, TF2's
 
 ## Limitations
 
-- **Static props are not collided.** Their physics models live in the game's
-  VPKs, not the `.bsp`, so areas can pass under or through `prop_static`s.
+- Prop models a map names but no content holds are listed in the report
+  (`props.missing_models`) and left out; point `--game-dir` at the game that
+  ships them.
+- Prop dynamic entities (`prop_dynamic`, `prop_physics`) do not block, as
+  they can move.
 - No ladders, places, or hiding spots; `nav_analyze` adds the latter in game.
 - A passage narrower than about two grid cells plus the hull width can hold
   walkable samples but no area, which can leave a small island disconnected.

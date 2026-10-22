@@ -1,8 +1,10 @@
 //! Use cases: each coordinates the seams for one thing a tool does, and
 //! sorts what goes wrong into the caller's fault or ours.
 
+pub mod content;
 pub mod generate;
 pub mod inspect;
+pub mod models;
 pub mod report;
 
 use serde::Serialize;

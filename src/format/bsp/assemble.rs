@@ -7,7 +7,7 @@ use std::collections::BTreeSet;
 
 use crate::core::geom::{Plane, Vec3};
 use crate::core::solid::{ConvexSolid, SolidError};
-use crate::core::world::MapContents;
+use crate::core::world::{MapContents, StaticProp};
 
 use super::displacement::{DisplacementError, DisplacementSurface};
 use super::entities::parse_entities;
@@ -39,7 +39,7 @@ fn get<'a, T>(items: &'a [T], index: i64, what: &'static str) -> Result<&'a T, B
     usize::try_from(index).ok().and_then(|i| items.get(i)).ok_or(BspError::BadIndex { what, index })
 }
 
-pub fn assemble(lumps: &Lumps<'_>) -> Result<Map, BspError> {
+pub fn assemble(lumps: &Lumps<'_>, props: Vec<StaticProp>) -> Result<Map, BspError> {
     let tables = Tables {
         planes: table(lumps)?,
         brushes: table(lumps)?,
@@ -69,7 +69,8 @@ pub fn assemble(lumps: &Lumps<'_>) -> Result<Map, BspError> {
     stats.brush_models = models.len().saturating_sub(1);
 
     let prisms = displacement_prisms(lumps, &tables.planes, &mut stats)?;
-    let contents = MapContents::new(entities, models, prisms)?;
+    stats.static_props = props.len();
+    let contents = MapContents::new(entities, models, prisms, props)?;
     Ok(Map { version: lumps.version(), contents, stats })
 }
 

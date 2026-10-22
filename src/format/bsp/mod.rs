@@ -7,11 +7,13 @@ mod assemble;
 mod displacement;
 mod entities;
 mod lumps;
+mod props;
 mod records;
 
 pub use displacement::{DisplacementError, DisplacementSurface};
 pub use entities::EntityError;
 pub use lumps::LumpId;
+pub use props::{normalize_path, pakfile_files};
 
 use crate::core::solid::SolidError;
 use crate::core::world::{MapContents, WorldError};
@@ -26,6 +28,7 @@ pub struct Map {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct MapStats {
+    pub static_props: usize,
     /// Player-blocking brushes in the world model.
     pub brushes: usize,
     /// Models besides the world, each a brush entity's.
@@ -81,9 +84,14 @@ pub enum BspError {
     Entities(#[from] EntityError),
     #[error(transparent)]
     World(#[from] WorldError),
+    #[error("static props: {0}")]
+    StaticProps(String),
+    #[error("pakfile: {0}")]
+    Pakfile(String),
 }
 
 pub fn parse(bytes: &[u8]) -> Result<Map, BspError> {
     let lumps = lumps::Lumps::read(bytes)?;
-    assemble::assemble(&lumps)
+    let props = props::static_props(bytes)?;
+    assemble::assemble(&lumps, props)
 }

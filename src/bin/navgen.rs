@@ -36,6 +36,13 @@ struct Args {
     /// Largest height a cell corner may stray from its merged area (default 6).
     #[arg(long)]
     merge_tolerance: Option<Length>,
+    /// Leave static props out, so players walk through them.
+    #[arg(long)]
+    no_props: bool,
+    /// A game directory to find prop models in (loose files and *_dir.vpk); repeatable.
+    /// Defaults to the directory holding the map's maps/, and an hl2/ beside it.
+    #[arg(long = "game-dir", value_name = "DIR")]
+    game_dirs: Vec<PathBuf>,
     /// Report in JSON instead of TOON.
     #[arg(long)]
     json: bool,
@@ -62,6 +69,8 @@ fn main() -> ExitCode {
         seeds: args.seed,
         cell_size: args.cell_size,
         merge_tolerance: args.merge_tolerance,
+        props: !args.no_props,
+        game_dirs: args.game_dirs,
     };
     let mut pool = rayon::ThreadPoolBuilder::new();
     if let Some(n) = args.threads {

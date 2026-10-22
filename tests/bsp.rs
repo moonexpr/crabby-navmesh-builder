@@ -7,12 +7,16 @@ use crabby_navmesh_builder::core::world::{World, WorldError};
 use crabby_navmesh_builder::format::bsp::{BspError, parse};
 use crabby_navmesh_builder::spec::Build;
 
-use support::bsp_writer::{BspWriter, CONTENTS_PLAYERCLIP, CONTENTS_SOLID, CONTENTS_WATER, box_planes};
+use crabby_navmesh_builder::core::world::PropCollision;
+use crabby_navmesh_builder::format::bsp::pakfile_files;
+use support::bsp_writer::{
+    BspWriter, CONTENTS_PLAYERCLIP, CONTENTS_SOLID, CONTENTS_WATER, SOLID_BBOX, SOLID_NONE, SOLID_VPHYSICS, box_planes,
+};
 
 /// The map's world as TF2 sees it.
 fn tf_world(bytes: &[u8]) -> World {
     let map = parse(bytes).expect("parses");
-    World::assemble(&map.contents, Build::Tf.spec().expect("supported").policy())
+    World::assemble(&map.contents, Build::Tf.spec().expect("supported").policy(), None)
 }
 
 fn v(x: f32, y: f32, z: f32) -> Vec3 {
@@ -154,4 +158,39 @@ fn an_entity_naming_a_missing_brush_model_is_refused_at_parse() {
     map.box_brush(0, v(0.0, 0.0, -16.0), v(512.0, 512.0, 0.0), CONTENTS_SOLID);
     map.entity(&[("classname", "func_brush"), ("model", "*4")]);
     assert!(matches!(parse(&map.build(20)), Err(BspError::World(WorldError::UnknownModel { model: 4, .. }))));
+}
+
+#[test]
+fn static_props_come_through_with_normalized_models_and_their_rotation() {
+    let mut map = BspWriter::new();
+    map.box_brush(0, v(0.0, 0.0, -16.0), v(512.0, 512.0, 0.0), CONTENTS_SOLID);
+    map.static_prop("Models\\Props_Farm/Barrel.mdl", v(100.0, 200.0, 0.0), [0.0, 90.0, 0.0], SOLID_VPHYSICS);
+    map.static_prop("models/props_farm/crate.mdl", v(300.0, 300.0, 0.0), [0.0, 0.0, 0.0], SOLID_BBOX);
+    map.static_prop("models/props_farm/crate.mdl", v(50.0, 50.0, 0.0), [0.0, 0.0, 0.0], SOLID_NONE);
+    let parsed = parse(&map.build(20)).expect("parses");
+    let props = parsed.contents.props();
+    assert_eq!(parsed.stats.static_props, 3);
+    let barrel = props.iter().find(|p| p.model == "models/props_farm/barrel.mdl").expect("normalized path");
+    assert_eq!(barrel.origin, v(100.0, 200.0, 0.0));
+    assert_eq!(barrel.collision, PropCollision::VPhysics);
+    assert!((barrel.rotation * Vec3::X - Vec3::Y).length() < 1e-5, "yaw 90 turns forward to +y");
+    let collisions: Vec<PropCollision> = props.iter().map(|p| p.collision).collect();
+    assert!(collisions.contains(&PropCollision::BoundingBox) && collisions.contains(&PropCollision::None));
+}
+
+#[test]
+fn a_map_without_static_props_has_none() {
+    let mut map = BspWriter::new();
+    map.box_brush(0, v(0.0, 0.0, -16.0), v(512.0, 512.0, 0.0), CONTENTS_SOLID);
+    assert!(parse(&map.build(20)).expect("parses").contents.props().is_empty());
+}
+
+#[test]
+fn pakfile_files_are_read_by_normalized_path() {
+    let mut map = BspWriter::new();
+    map.box_brush(0, v(0.0, 0.0, -16.0), v(512.0, 512.0, 0.0), CONTENTS_SOLID);
+    map.pack("Models/Custom/Rock.PHY", b"phy bytes");
+    map.pack("materials/custom/rock.vmt", b"vmt bytes");
+    let files = pakfile_files(&map.build(20), |path| path.ends_with(".phy")).expect("readable");
+    assert_eq!(files, vec![("models/custom/rock.phy".to_string(), b"phy bytes".to_vec())]);
 }

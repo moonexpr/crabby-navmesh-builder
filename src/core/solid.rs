@@ -1,9 +1,10 @@
 //! Convex solids: the only collision primitive the generator traces against.
-//! Brushes arrive as one directly; displacement triangles become thin prisms.
+//! Brushes arrive as one directly; displacement triangles become thin prisms;
+//! a static prop's collision model is a set of convex [`Hull`]s, placed.
 
 use std::fmt;
 
-use crate::core::geom::{Aabb, Plane, Vec3};
+use crate::core::geom::{Aabb, Mat3, Plane, Vec3};
 
 /// Distances within this many units count as touching rather than overlapping.
 pub const CONTACT_EPSILON: f32 = 0.01;
@@ -41,6 +42,78 @@ pub enum SolidError {
     Unbounded(AxialSide),
     #[error("triangle has no area")]
     DegenerateTriangle,
+    #[error("hull triangle {triangle} names point {point}, but the hull has {points}")]
+    HullIndex { triangle: usize, point: usize, points: usize },
+    #[error("hull encloses no volume")]
+    DegenerateHull,
+}
+
+/// Whether the points span three dimensions: some four of them make a
+/// tetrahedron of real volume.
+fn encloses_volume(points: &[Vec3]) -> bool {
+    const SPREAD: f32 = 1e-3;
+    let Some(&first) = points.first() else {
+        return false;
+    };
+    let far = |score: &dyn Fn(Vec3) -> f32| points.iter().copied().max_by(|a, b| score(*a).total_cmp(&score(*b)));
+    let Some(second) = far(&|p| (p - first).length()).filter(|p| (*p - first).length() > SPREAD) else {
+        return false;
+    };
+    let axis = (second - first).normalize();
+    let off_line = |p: Vec3| (p - first).cross(axis).length();
+    let Some(third) = far(&off_line).filter(|p| off_line(*p) > SPREAD) else {
+        return false;
+    };
+    let normal = (second - first).cross(third - first).normalize();
+    points.iter().any(|p| normal.dot(*p - first).abs() > SPREAD)
+}
+
+/// A convex piece of a collision model in its own space: points, and the
+/// triangles of its surface. One that exists has valid indices and volume.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Hull {
+    points: Vec<Vec3>,
+    triangles: Vec<[usize; 3]>,
+}
+
+impl Hull {
+    pub fn new(points: Vec<Vec3>, triangles: Vec<[usize; 3]>) -> Result<Self, SolidError> {
+        for (triangle, corners) in triangles.iter().enumerate() {
+            if let Some(&point) = corners.iter().find(|&&i| i >= points.len()) {
+                return Err(SolidError::HullIndex { triangle, point, points: points.len() });
+            }
+        }
+        if !encloses_volume(&points) {
+            return Err(SolidError::DegenerateHull);
+        }
+        Ok(Self { points, triangles })
+    }
+
+    /// The hull of an axial box: eight corners, twelve triangles.
+    pub fn axis_box(bounds: Aabb) -> Self {
+        let (lo, hi) = (bounds.min(), bounds.max());
+        // Corner i takes max on x for bit 0, on y for bit 1, on z for bit 2.
+        let points = (0..8)
+            .map(|i| {
+                Vec3::new(
+                    if i & 1 == 0 { lo.x } else { hi.x },
+                    if i & 2 == 0 { lo.y } else { hi.y },
+                    if i & 4 == 0 { lo.z } else { hi.z },
+                )
+            })
+            .collect();
+        let faces = [[0, 1, 3, 2], [4, 5, 7, 6], [0, 1, 5, 4], [2, 3, 7, 6], [0, 2, 6, 4], [1, 3, 7, 5]];
+        let triangles = faces.iter().flat_map(|[a, b, c, d]| [[*a, *b, *c], [*a, *c, *d]]).collect();
+        Self { points, triangles }
+    }
+
+    pub fn points(&self) -> &[Vec3] {
+        &self.points
+    }
+
+    pub fn triangles(&self) -> &[[usize; 3]] {
+        &self.triangles
+    }
 }
 
 /// The closed vertical interval a solid occupies on one column, with the
@@ -127,6 +200,35 @@ impl ConvexSolid {
             .fold(Aabb::from_corners(a, a), |acc, v| acc.union(&Aabb::from_corners(*v, *v)));
         planes.extend(Self::axis_box(bounds).planes);
         Ok(Self { planes, bounds })
+    }
+
+    /// The hull placed in the world: each point mapped to `rotation * p + origin`,
+    /// bounded by its triangles' planes and its axial bevels.
+    pub fn from_hull(hull: &Hull, rotation: Mat3, origin: Vec3) -> Self {
+        let placed: Vec<Vec3> = hull.points.iter().map(|p| rotation * *p + origin).collect();
+        let centroid = placed.iter().copied().sum::<Vec3>() / placed.len() as f32;
+        let mut planes: Vec<Plane> = Vec::with_capacity(hull.triangles.len() + 6);
+        for [a, b, c] in &hull.triangles {
+            let (a, b, c) = (placed[*a], placed[*b], placed[*c]);
+            let Some(mut normal) = (b - a).cross(c - a).try_normalize() else {
+                continue; // a sliver triangle bounds nothing
+            };
+            if normal.dot(centroid - a) > 0.0 {
+                normal = -normal;
+            }
+            let plane = Plane { normal, dist: normal.dot(a) };
+            let repeats = planes
+                .iter()
+                .any(|q| q.normal.dot(plane.normal) > AXIAL && (q.dist - plane.dist).abs() < CONTACT_EPSILON);
+            if !repeats {
+                planes.push(plane);
+            }
+        }
+        let bounds = placed
+            .iter()
+            .fold(Aabb::from_corners(placed[0], placed[0]), |acc, p| acc.union(&Aabb::from_corners(*p, *p)));
+        planes.extend(Self::axis_box(bounds).planes);
+        Self { planes, bounds }
     }
 
     pub fn translated(&self, by: Vec3) -> Self {
@@ -302,6 +404,47 @@ mod tests {
         assert!((span.bottom + 4.0).abs() < 1e-4);
         assert!((span.top_normal.z - 1.0).abs() < 1e-6);
         assert_eq!(prism.vertical_span(90.0, 90.0), None);
+    }
+
+    fn cube_hull() -> Hull {
+        Hull::axis_box(Aabb::from_corners(Vec3::new(-8.0, -8.0, 0.0), Vec3::new(8.0, 8.0, 16.0)))
+    }
+
+    #[test]
+    fn a_box_hull_has_eight_corners_and_twelve_faces() {
+        let hull = cube_hull();
+        assert_eq!((hull.points().len(), hull.triangles().len()), (8, 12));
+    }
+
+    #[test]
+    fn a_hull_naming_a_missing_point_is_refused() {
+        let result = Hull::new(vec![Vec3::ZERO, Vec3::X, Vec3::Y, Vec3::Z], vec![[0, 1, 9]]);
+        assert_eq!(result, Err(SolidError::HullIndex { triangle: 0, point: 9, points: 4 }));
+    }
+
+    #[test]
+    fn a_flat_hull_is_refused() {
+        let flat = vec![Vec3::ZERO, Vec3::X, Vec3::Y, Vec3::new(1.0, 1.0, 0.0)];
+        assert_eq!(Hull::new(flat, vec![[0, 1, 2], [1, 3, 2]]), Err(SolidError::DegenerateHull));
+    }
+
+    #[test]
+    fn a_placed_hull_is_moved_and_solid_inside() {
+        let solid = ConvexSolid::from_hull(&cube_hull(), Mat3::IDENTITY, Vec3::new(100.0, 0.0, 50.0));
+        assert_eq!(solid.bounds().min(), Vec3::new(92.0, -8.0, 50.0));
+        let span = solid.vertical_span(100.0, 0.0).expect("inside");
+        assert!((span.top - 66.0).abs() < 1e-4 && (span.bottom - 50.0).abs() < 1e-4);
+        assert!(solid.vertical_span(109.0, 0.0).is_none());
+    }
+
+    #[test]
+    fn a_hull_turned_45_degrees_reaches_its_corners_along_the_axes() {
+        let turned = crate::core::geom::angle_matrix([0.0, 45.0, 0.0]);
+        let solid = ConvexSolid::from_hull(&cube_hull(), turned, Vec3::ZERO);
+        let corner = 8.0 * std::f32::consts::SQRT_2;
+        assert!((solid.bounds().max().x - corner).abs() < 1e-3);
+        assert!(solid.vertical_span(corner - 0.5, 0.0).is_some(), "the turned corner points along +x");
+        assert!(solid.vertical_span(7.0, 7.0).is_none(), "the old corner is now outside");
     }
 
     #[test]

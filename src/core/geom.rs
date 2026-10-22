@@ -1,7 +1,21 @@
 //! Geometry in Source world units (x east, y north-is-negative, z up).
 //! Vectors are `glam`'s; planes and boxes are this crate's own value types.
 
-pub use glam::Vec3;
+pub use glam::{Mat3, Vec3};
+
+/// Valve's `AngleMatrix`: a `QAngle` in degrees (`[pitch, yaw, roll]`) as
+/// a rotation whose columns are the forward, left, and up axes, so a point
+/// in model space maps to the world as `rotation * point + origin`.
+pub fn angle_matrix(angles: [f32; 3]) -> Mat3 {
+    let [pitch, yaw, roll] = angles.map(f32::to_radians);
+    let ((sp, cp), (sy, cy), (sr, cr)) = (pitch.sin_cos(), yaw.sin_cos(), roll.sin_cos());
+    let (crcy, crsy, srcy, srsy) = (cr * cy, cr * sy, sr * cy, sr * sy);
+    Mat3::from_cols(
+        Vec3::new(cp * cy, cp * sy, -sp),
+        Vec3::new(sp * srcy - crsy, sp * srsy + crcy, sr * cp),
+        Vec3::new(sp * crcy + srsy, sp * crsy - srcy, cr * cp),
+    )
+}
 
 /// The set of points `p` with `normal · p == dist`. A convex solid lies on the
 /// side where `normal · p < dist`, matching the BSP's outward-facing brush sides.
@@ -66,6 +80,30 @@ impl Aabb {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn close(a: Vec3, b: Vec3) -> bool {
+        (a - b).length() < 1e-5
+    }
+
+    #[test]
+    fn no_rotation_is_the_identity() {
+        assert!(close(angle_matrix([0.0, 0.0, 0.0]) * Vec3::new(1.0, 2.0, 3.0), Vec3::new(1.0, 2.0, 3.0)));
+    }
+
+    #[test]
+    fn yaw_turns_forward_toward_left() {
+        assert!(close(angle_matrix([0.0, 90.0, 0.0]) * Vec3::X, Vec3::Y));
+    }
+
+    #[test]
+    fn positive_pitch_looks_down() {
+        assert!(close(angle_matrix([90.0, 0.0, 0.0]) * Vec3::X, -Vec3::Z));
+    }
+
+    #[test]
+    fn roll_turns_left_toward_up() {
+        assert!(close(angle_matrix([0.0, 0.0, 90.0]) * Vec3::Y, Vec3::Z));
+    }
 
     #[test]
     fn corners_in_any_order_make_the_same_box() {

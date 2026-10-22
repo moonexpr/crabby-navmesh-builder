@@ -26,7 +26,8 @@ layer names a game.
 | Parser | `format::bsp::parse`, `format::nav::parse` | Factory | Bytes become domain values or are refused, once, at the edge; nothing past it re-checks |
 | Compiler | `format::nav::compile` | Template method | Writes `CNavMesh`'s base layout and calls the dialect's hooks where a game adds its own data |
 | Specification | `spec` | Strategy, factory | `Build` names a game; `Build::spec()` gives its `GameSpec` or refuses it as unsupported. A spec owns its nav dialect and its game policy: spawn classes, which brush entities stay solid, the agent's size |
-| World assembly | `core::world` | Builder | The parser reports what a map holds; assembly decides, under a spec's policy, what blocks a player. New solid sources (static props) join here |
+| World assembly | `core::world` | Builder | The parser reports what a map holds; assembly decides, under a spec's policy, what blocks a player, and places static props through the `PropModels` port |
+| Content | `app::content`, `app::models` | Port and adapters, chain | Game files by path from the pakfile, loose game directories, and VPKs, tried in the engine's order; `ModelLibrary` turns them into prop hulls |
 
 ## Adding a game
 
