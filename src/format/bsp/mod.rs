@@ -16,6 +16,7 @@ pub use lumps::LumpId;
 pub use props::{normalize_path, pakfile_files};
 
 use crate::core::solid::SolidError;
+pub use crate::core::world::Contents;
 use crate::core::world::{MapContents, WorldError};
 
 /// A compiled map reduced to what navigation needs.
@@ -35,29 +36,6 @@ pub struct MapStats {
     pub brush_models: usize,
     pub displacements: usize,
     pub displacement_triangles: usize,
-}
-
-/// Brush contents bits from `bspflags.h`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Contents(u32);
-
-impl Contents {
-    pub const SOLID: Contents = Contents(0x1);
-    pub const WINDOW: Contents = Contents(0x2);
-    pub const GRATE: Contents = Contents(0x8);
-    pub const MOVEABLE: Contents = Contents(0x4000);
-    pub const PLAYER_CLIP: Contents = Contents(0x1_0000);
-    /// `MASK_PLAYERSOLID_BRUSHONLY`, the mask `nav_generate` traces with.
-    pub const PLAYER_SOLID: Contents =
-        Contents(Self::SOLID.0 | Self::WINDOW.0 | Self::GRATE.0 | Self::MOVEABLE.0 | Self::PLAYER_CLIP.0);
-
-    pub fn from_bits(bits: u32) -> Self {
-        Contents(bits)
-    }
-
-    pub fn intersects(self, mask: Contents) -> bool {
-        self.0 & mask.0 != 0
-    }
 }
 
 #[derive(Debug, thiserror::Error, PartialEq)]

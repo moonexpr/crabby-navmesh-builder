@@ -277,6 +277,13 @@ impl ConvexSolid {
     /// (box centers), overlaps the solid's interior anywhere on the way.
     /// Touching the surface does not count.
     pub fn blocks_box_sweep(&self, half: Vec3, from: Vec3, to: Vec3) -> bool {
+        self.sweep_entry(half, from, to).is_some()
+    }
+
+    /// How far along the sweep, from 0 to 1, the box first enters the
+    /// solid's interior; `None` when it never does. A box starting inside
+    /// enters at 0.
+    pub fn sweep_entry(&self, half: Vec3, from: Vec3, to: Vec3) -> Option<f32> {
         // Minkowski sum: push each plane out by the box's support distance,
         // then clip the center segment against the grown solid.
         let (mut enter, mut leave) = (0.0f32, 1.0f32);
@@ -287,16 +294,16 @@ impl ConvexSolid {
             let start_inside = start < -CONTACT_EPSILON;
             let end_inside = end < -CONTACT_EPSILON;
             match (start_inside, end_inside) {
-                (false, false) => return false,
+                (false, false) => return None,
                 (true, true) => continue,
                 (false, true) => enter = enter.max(start / (start - end)),
                 (true, false) => leave = leave.min(start / (start - end)),
             }
             if enter >= leave {
-                return false;
+                return None;
             }
         }
-        true
+        Some(enter)
     }
 }
 
@@ -445,6 +452,17 @@ mod tests {
         assert!((solid.bounds().max().x - corner).abs() < 1e-3);
         assert!(solid.vertical_span(corner - 0.5, 0.0).is_some(), "the turned corner points along +x");
         assert!(solid.vertical_span(7.0, 7.0).is_none(), "the old corner is now outside");
+    }
+
+    #[test]
+    fn a_sweep_enters_where_it_first_touches_the_interior() {
+        let wall =
+            ConvexSolid::axis_box(Aabb::from_corners(Vec3::new(100.0, -50.0, 0.0), Vec3::new(116.0, 50.0, 100.0)));
+        let entry = wall.sweep_entry(Vec3::ZERO, Vec3::new(0.0, 0.0, 50.0), Vec3::new(200.0, 0.0, 50.0)).expect("hits");
+        assert!((entry - 0.5).abs() < 1e-4, "entry was {entry}");
+        let inside = wall.sweep_entry(Vec3::ZERO, Vec3::new(108.0, 0.0, 50.0), Vec3::new(300.0, 0.0, 50.0));
+        assert_eq!(inside, Some(0.0));
+        assert_eq!(wall.sweep_entry(Vec3::ZERO, Vec3::new(0.0, 80.0, 50.0), Vec3::new(200.0, 80.0, 50.0)), None);
     }
 
     #[test]

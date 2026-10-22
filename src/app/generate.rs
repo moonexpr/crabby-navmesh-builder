@@ -10,7 +10,7 @@ use crate::core::collision::SolidGrid;
 use crate::core::generate::{self, Params};
 use crate::core::geom::Vec3;
 use crate::core::mesh::NavMesh;
-use crate::core::world::{PropModels, World};
+use crate::core::world::{Contents, PropModels, World};
 use crate::format::{bsp, nav};
 use crate::spec::Build;
 
@@ -131,7 +131,12 @@ pub fn generate_nav(request: &GenerateRequest) -> Result<GenerateReport, Failure
     } else {
         (None, Vec::new())
     };
-    let world = World::assemble(&map.contents, spec.policy(), library.as_ref().map(|l| l as &dyn PropModels));
+    let world = World::assemble(
+        &map.contents,
+        spec.policy(),
+        library.as_ref().map(|l| l as &dyn PropModels),
+        Contents::PLAYER_SOLID,
+    );
     let prop_report = PropReport {
         placed: world.props.placed,
         total: world.props.total,

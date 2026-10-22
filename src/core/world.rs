@@ -7,6 +7,46 @@ use std::collections::BTreeSet;
 use crate::core::geom::{Mat3, Vec3};
 use crate::core::solid::{ConvexSolid, Hull};
 
+/// Brush contents bits from `bspflags.h`, and the masks traces use.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Contents(u32);
+
+impl Contents {
+    pub const SOLID: Contents = Contents(0x1);
+    pub const WINDOW: Contents = Contents(0x2);
+    pub const GRATE: Contents = Contents(0x8);
+    pub const BLOCK_LOS: Contents = Contents(0x40);
+    pub const MOVEABLE: Contents = Contents(0x4000);
+    pub const PLAYER_CLIP: Contents = Contents(0x1_0000);
+    pub const MONSTER_CLIP: Contents = Contents(0x2_0000);
+    /// `MASK_PLAYERSOLID_BRUSHONLY`: what `nav_generate` walks against.
+    pub const PLAYER_SOLID: Contents =
+        Contents(Self::SOLID.0 | Self::WINDOW.0 | Self::GRATE.0 | Self::MOVEABLE.0 | Self::PLAYER_CLIP.0);
+    /// `MASK_BLOCKLOS`: what blocks nav analysis' line of sight. Clip
+    /// brushes, windows, and grates do not.
+    pub const SIGHT: Contents = Contents(Self::SOLID.0 | Self::MOVEABLE.0 | Self::BLOCK_LOS.0);
+    /// `MASK_NPCSOLID_BRUSHONLY`: what hiding spots take cover behind.
+    pub const NPC_SOLID: Contents =
+        Contents(Self::SOLID.0 | Self::MOVEABLE.0 | Self::WINDOW.0 | Self::MONSTER_CLIP.0 | Self::GRATE.0);
+    /// Every mask above together: the brushes worth keeping.
+    pub const ANY_MASK: Contents = Contents(Self::PLAYER_SOLID.0 | Self::SIGHT.0 | Self::NPC_SOLID.0);
+
+    pub fn from_bits(bits: u32) -> Self {
+        Contents(bits)
+    }
+
+    pub fn intersects(self, mask: Contents) -> bool {
+        self.0 & mask.0 != 0
+    }
+}
+
+/// A brush and what it is made of.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Brush {
+    pub solid: ConvexSolid,
+    pub contents: Contents,
+}
+
 /// One map entity, with the keys navigation reads already typed.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Entity {
@@ -79,7 +119,7 @@ pub trait PropModels {
 #[derive(Clone, Debug, PartialEq)]
 pub struct MapContents {
     entities: Vec<Entity>,
-    models: Vec<Vec<ConvexSolid>>,
+    models: Vec<Vec<Brush>>,
     displacements: Vec<ConvexSolid>,
     props: Vec<StaticProp>,
 }
@@ -89,7 +129,7 @@ impl MapContents {
     /// can take every model it is handed.
     pub fn new(
         entities: Vec<Entity>,
-        models: Vec<Vec<ConvexSolid>>,
+        models: Vec<Vec<Brush>>,
         displacements: Vec<ConvexSolid>,
         props: Vec<StaticProp>,
     ) -> Result<Self, WorldError> {
@@ -114,7 +154,7 @@ impl MapContents {
         &self.props
     }
 
-    pub fn world_brushes(&self) -> &[ConvexSolid] {
+    pub fn world_brushes(&self) -> &[Brush] {
         self.models.first().map(Vec::as_slice).unwrap_or(&[])
     }
 }
@@ -150,22 +190,35 @@ pub struct World {
 }
 
 impl World {
+    /// The world as traces against `mask` meet it: brushes whose contents
+    /// the mask names, with displacements and props, which are solid.
     /// Without `prop_models`, static props are left out and the summary
     /// says so.
-    pub fn assemble(contents: &MapContents, policy: &dyn WorldPolicy, prop_models: Option<&dyn PropModels>) -> World {
-        let mut solids = contents.world_brushes().to_vec();
+    pub fn assemble(
+        contents: &MapContents,
+        policy: &dyn WorldPolicy,
+        prop_models: Option<&dyn PropModels>,
+        mask: Contents,
+    ) -> World {
+        let blocking = |brushes: &[Brush]| -> Vec<ConvexSolid> {
+            brushes.iter().filter(|b| b.contents.intersects(mask)).map(|b| b.solid.clone()).collect()
+        };
+        let mut solids = blocking(contents.world_brushes());
         let mut solid_brush_entities = 0;
         for entity in &contents.entities {
             let Some(model) = entity.brush_model.filter(|m| *m > 0) else {
                 continue;
             };
             if policy.stays_solid(entity) {
-                solids.extend(contents.models[model].iter().map(|s| s.translated(entity.origin)));
+                solids.extend(blocking(&contents.models[model]).iter().map(|s| s.translated(entity.origin)));
                 solid_brush_entities += 1;
             }
         }
-        solids.extend(contents.displacements.iter().cloned());
-        let props = match prop_models {
+        let solid_props_too = mask.intersects(Contents::SOLID);
+        if solid_props_too {
+            solids.extend(contents.displacements.iter().cloned());
+        }
+        let props = match prop_models.filter(|_| solid_props_too) {
             Some(models) => place_props(&contents.props, models, &mut solids),
             None => PropSummary { placed: false, total: contents.props.len(), ..PropSummary::default() },
         };
@@ -204,6 +257,14 @@ mod tests {
         ConvexSolid::axis_box(Aabb::from_corners(Vec3::splat(at), Vec3::splat(at + 8.0)))
     }
 
+    fn brush(at: f32, contents: Contents) -> Brush {
+        Brush { solid: cube(at), contents }
+    }
+
+    fn solid_brush(at: f32) -> Brush {
+        brush(at, Contents::SOLID)
+    }
+
     fn entity(classname: &str, origin: Vec3, model: Option<usize>) -> Entity {
         Entity::new(classname.to_string(), origin, model, vec![])
     }
@@ -222,7 +283,8 @@ mod tests {
 
     #[test]
     fn a_model_the_map_lacks_is_refused() {
-        let result = MapContents::new(vec![entity("wall", Vec3::ZERO, Some(3))], vec![vec![cube(0.0)]], vec![], vec![]);
+        let result =
+            MapContents::new(vec![entity("wall", Vec3::ZERO, Some(3))], vec![vec![solid_brush(0.0)]], vec![], vec![]);
         assert!(matches!(result, Err(WorldError::UnknownModel { index: 0, model: 3, models: 1, .. })));
     }
 
@@ -235,12 +297,12 @@ mod tests {
         ];
         let contents = MapContents::new(
             entities,
-            vec![vec![cube(0.0)], vec![cube(0.0)], vec![cube(50.0)]],
+            vec![vec![solid_brush(0.0)], vec![solid_brush(0.0)], vec![solid_brush(50.0)]],
             vec![cube(-50.0)],
             vec![],
         )
         .expect("models exist");
-        let world = World::assemble(&contents, &WallsAndStarts, None);
+        let world = World::assemble(&contents, &WallsAndStarts, None, Contents::PLAYER_SOLID);
         assert_eq!(world.solids.len(), 3, "world, the wall, and the displacement; not the door");
         assert_eq!(world.solids[1].bounds().min(), Vec3::new(100.0, 0.0, 0.0));
         assert_eq!(world.solid_brush_entities, 1);
@@ -267,8 +329,8 @@ mod tests {
     }
 
     fn props_world(props: Vec<StaticProp>, models: Option<&dyn PropModels>) -> World {
-        let contents = MapContents::new(vec![], vec![vec![cube(0.0)]], vec![], props).expect("valid");
-        World::assemble(&contents, &WallsAndStarts, models)
+        let contents = MapContents::new(vec![], vec![vec![solid_brush(0.0)]], vec![], props).expect("valid");
+        World::assemble(&contents, &WallsAndStarts, models, Contents::PLAYER_SOLID)
     }
 
     #[test]
@@ -318,5 +380,24 @@ mod tests {
         let world = props_world(vec![prop("models/barrel.mdl", Vec3::ZERO, PropCollision::VPhysics)], None);
         assert_eq!(world.solids.len(), 1);
         assert_eq!((world.props.placed, world.props.total), (false, 1));
+    }
+
+    #[test]
+    fn each_mask_meets_the_brushes_it_names() {
+        let brushes = vec![
+            solid_brush(0.0),
+            brush(20.0, Contents::PLAYER_CLIP),
+            brush(40.0, Contents::BLOCK_LOS),
+            brush(60.0, Contents::WINDOW),
+        ];
+        let contents = MapContents::new(vec![], vec![brushes], vec![cube(-50.0)], vec![]).expect("valid");
+        let count = |mask| World::assemble(&contents, &WallsAndStarts, None, mask).solids.len();
+        assert_eq!(count(Contents::PLAYER_SOLID), 1 + 1 + 1 + 1, "solid, clip, window, displacement");
+        assert_eq!(
+            count(Contents::SIGHT),
+            1 + 1 + 1,
+            "solid, block-LOS, displacement; clips and windows are seen through"
+        );
+        assert_eq!(count(Contents::NPC_SOLID), 1 + 1 + 1, "solid, window, displacement");
     }
 }

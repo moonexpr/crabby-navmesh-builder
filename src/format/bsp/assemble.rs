@@ -7,7 +7,7 @@ use std::collections::BTreeSet;
 
 use crate::core::geom::{Plane, Vec3};
 use crate::core::solid::{ConvexSolid, SolidError};
-use crate::core::world::{MapContents, StaticProp};
+use crate::core::world::{Brush, MapContents, StaticProp};
 
 use super::displacement::{DisplacementError, DisplacementSurface};
 use super::entities::parse_entities;
@@ -97,10 +97,11 @@ impl Tables {
         Ok(brushes)
     }
 
-    /// The brush as a solid, or `None` when players pass through it.
-    fn brush_solid(&self, index: usize) -> Result<Option<ConvexSolid>, BspError> {
+    /// The brush as a solid with its contents, or `None` when no trace mask meets it.
+    fn brush_solid(&self, index: usize) -> Result<Option<Brush>, BspError> {
         let brush = get(&self.brushes, index as i64, "brush")?;
-        if !Contents::from_bits(brush.contents).intersects(Contents::PLAYER_SOLID) {
+        let contents = Contents::from_bits(brush.contents);
+        if !contents.intersects(Contents::ANY_MASK) {
             return Ok(None);
         }
         let first = brush.first_side as i64;
@@ -110,7 +111,9 @@ impl Tables {
                 get(&self.planes, side.plane as i64, "plane").copied()
             })
             .collect::<Result<Vec<_>, _>>()?;
-        ConvexSolid::new(planes).map(Some).map_err(|source| BspError::Brush { brush: index, source })
+        ConvexSolid::new(planes)
+            .map(|solid| Some(Brush { solid, contents }))
+            .map_err(|source| BspError::Brush { brush: index, source })
     }
 }
 

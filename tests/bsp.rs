@@ -3,7 +3,7 @@ mod support;
 use crabby_navmesh_builder::core::collision::{Collision, SolidGrid};
 use crabby_navmesh_builder::core::geom::{Plane, Vec3};
 use crabby_navmesh_builder::core::solid::{AxialSide, SolidError};
-use crabby_navmesh_builder::core::world::{World, WorldError};
+use crabby_navmesh_builder::core::world::{Contents, World, WorldError};
 use crabby_navmesh_builder::format::bsp::{BspError, parse};
 use crabby_navmesh_builder::spec::Build;
 
@@ -16,7 +16,7 @@ use support::bsp_writer::{
 /// The map's world as TF2 sees it.
 fn tf_world(bytes: &[u8]) -> World {
     let map = parse(bytes).expect("parses");
-    World::assemble(&map.contents, Build::Tf.spec().expect("supported").policy(), None)
+    World::assemble(&map.contents, Build::Tf.spec().expect("supported").policy(), None, Contents::PLAYER_SOLID)
 }
 
 fn v(x: f32, y: f32, z: f32) -> Vec3 {
